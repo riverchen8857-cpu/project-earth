@@ -9,18 +9,20 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root { --cold: #7fe9ff; --warm: #ffe2a8; }
+  :root { --cold: #7fe9ff; --warm: #ffe2a8; --kill: #ff6a55; --line: rgba(127, 233, 255, .22); }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { background: #000; color: #fff; }
   body { font-family: "Noto Sans TC", system-ui, sans-serif; overflow-x: hidden; }
   #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
-  #track { position: relative; height: 900vh; }
+  #track { position: relative; height: 3400vh; }
 
-  .layer { position: fixed; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; }
+  .layer { position: fixed; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; opacity: 0; }
+  .cover { position: fixed; inset: 0; pointer-events: none; opacity: 0; }
+  #flash, #cloud { background: #fff; }
+  #dark { background: #000; }
 
   /* 第一幕：神聖 */
-  #line1 { opacity: 0; text-align: center; align-items: flex-end; padding-bottom: 11vh; }
+  #line1 { text-align: center; align-items: flex-end; padding-bottom: 11vh; }
   #line1 h1 {
     font-family: "Noto Serif TC", serif; font-weight: 700;
     font-size: clamp(28px, 4.6vw, 66px); letter-spacing: .32em; text-indent: .32em;
@@ -31,38 +33,67 @@
     font-size: clamp(14px, 1.5vw, 20px); letter-spacing: .6em; text-indent: .6em; color: rgba(255, 236, 200, .7);
   }
 
-  /* 第二幕：冰冷 */
-  #line2 { opacity: 0; align-items: center; justify-content: flex-start; padding: 0 6vw; }
-  #line2 h2 {
+  /* 之後各幕共用：冷色大字、資料列 */
+  .cap h2 {
     font-weight: 500; font-size: clamp(24px, 3.2vw, 46px); line-height: 1.4; letter-spacing: .12em; color: var(--cold);
     text-shadow: 0 0 24px rgba(127, 233, 255, .5); font-variant-numeric: tabular-nums;
   }
-  #line2 p { margin-top: 12px; font-size: clamp(13px, 1.3vw, 18px); letter-spacing: .3em; color: rgba(190, 240, 255, .7); }
+  .cap p { margin-top: 12px; font-size: clamp(13px, 1.3vw, 18px); line-height: 1.8; letter-spacing: .3em; color: rgba(190, 240, 255, .7); }
+  .left { justify-content: flex-start; padding: 0 6vw; }
+  .right { justify-content: flex-end; padding: 0 6vw; }
+  .top { align-items: flex-start; padding-top: 12vh; }
+  .bottom { align-items: flex-end; padding-bottom: 11vh; }
 
-  #hud { align-items: flex-start; justify-content: flex-end; padding: 12vh 6vw 0; }
-  #hud ul { list-style: none; width: min(340px, 78vw); }
-  #hud li {
+  .rows { list-style: none; width: min(340px, 78vw); }
+  .rows li {
     display: flex; justify-content: space-between; gap: 16px; padding: 12px 0;
-    border-bottom: 1px solid rgba(127, 233, 255, .22);
+    border-bottom: 1px solid var(--line);
     font-size: 14px; letter-spacing: .14em; color: rgba(200, 244, 255, .82);
     opacity: 0; transform: translateY(8px); font-variant-numeric: tabular-nums;
   }
-  #hud li b { font-weight: 500; color: var(--cold); }
+  .rows li b { font-weight: 500; color: rgba(200, 244, 255, .45); transition: color .3s, text-shadow .3s; }
+  .rows li.on b { color: var(--cold); text-shadow: 0 0 12px rgba(127, 233, 255, .6); }
+  #hud li b, #you li b { color: var(--cold); }
+
+  /* 第三幕：輪次 */
+  #rounds { list-style: none; }
+  #rounds li {
+    display: flex; gap: 1.2em; align-items: baseline; padding: 9px 0; opacity: 0;
+    font-size: clamp(16px, 1.7vw, 24px); letter-spacing: .2em; color: rgba(200, 244, 255, .85);
+  }
+  #rounds li span { color: var(--cold); }
+  #rounds li b { font-weight: 400; }
+  #rounds li i { font-style: normal; color: var(--kill); opacity: 0; text-shadow: 0 0 14px rgba(255, 106, 85, .6); }
+  #a3end { margin-top: 5vh; opacity: 0; }
+
+  #a4note { margin: 0 0 3vh; opacity: 0; }
+  #a4h { opacity: 0; }
+
+  /* 第七幕：框住訪客 */
+  #frame { position: fixed; inset: 3.5vmin; border: 1px solid rgba(127, 233, 255, .7); box-shadow: 0 0 24px rgba(127, 233, 255, .25), inset 0 0 24px rgba(127, 233, 255, .12); pointer-events: none; opacity: 0; }
+  #a7 { flex-direction: column; gap: 5vh; text-align: center; }
+  #a7 .rows { width: min(360px, 78vw); text-align: left; }
+  #a7 h2 { font-size: clamp(28px, 4.4vw, 64px); letter-spacing: .2em; text-indent: .2em; opacity: 0; }
+  #a7 p { opacity: 0; letter-spacing: .5em; text-indent: .5em; }
 
   #hint { align-items: flex-end; padding-bottom: 5vh; font-size: 13px; letter-spacing: .5em; text-indent: .5em; color: rgba(255,255,255,.55); }
-  #end { opacity: 0; align-items: flex-end; padding-bottom: 5vh; font-size: 13px; letter-spacing: .4em; text-indent: .4em; color: rgba(190, 240, 255, .6); }
 
   @media (max-width: 767px) {
-    #hud { padding: 9vh 16px 0; }
-    #line2 { align-items: flex-end; padding: 0 16px 9vh; }
-    #hud li { padding: 8px 0; font-size: 13px; }
+    .left, .right { padding-left: 16px; padding-right: 16px; }
+    .top { padding-top: 8vh; }
+    .bottom { padding-bottom: 8vh; }
+    .rows li { padding: 8px 0; font-size: 13px; }
+    #line2, #a4b, #a5b, #a6 { align-items: flex-end; padding-bottom: 8vh; }
+    #a3 { align-items: flex-start; padding-top: 7vh; }
+    #rounds li { padding: 5px 0; }
+    #a3end { margin-top: 2vh; }
   }
 </style>
 </head>
 <body>
 <canvas id="scene"></canvas>
-<div id="flash"></div>
 
+<!-- 第一幕 -->
 <div class="layer" id="line1">
   <div>
     <h1>起初 神創造天地</h1>
@@ -70,8 +101,9 @@
   </div>
 </div>
 
-<div class="layer" id="hud">
-  <ul>
+<!-- 第二幕 -->
+<div class="layer right top" id="hud">
+  <ul class="rows">
     <li><span>專案</span><b>地球</b></li>
     <li><span>光束校準</span><b id="v-beam">0.00%</b></li>
     <li><span>大氣合成</span><b id="v-air">0.00%</b></li>
@@ -80,16 +112,94 @@
     <li><span>觀察者</span><b>在線</b></li>
   </ul>
 </div>
-
-<div class="layer" id="line2">
+<div class="layer left cap" id="line2">
   <div>
     <h2>專案編號 <span id="v-id">000000</span><br>啟動中</h2>
     <p>這裡沒有天堂　這是一間實驗艙</p>
   </div>
 </div>
 
+<!-- 第三幕 -->
+<div class="layer left cap" id="a3">
+  <div>
+    <ol id="rounds">
+      <li><span>第一輪</span><b>投放</b><i>銷毀</i></li>
+      <li><span>第二輪</span><b>投放</b><i>銷毀</i></li>
+      <li><span>第三輪</span><b>投放</b><i>銷毀</i></li>
+      <li><span>第四輪</span><b>投放</b><i>銷毀</i></li>
+      <li><span>第五輪</span><b>統治一億六千萬年</b><i>銷毀</i></li>
+      <li><span>第六輪</span><b>投放</b></li>
+    </ol>
+    <div id="a3end">
+      <h2>人類不是被選中的</h2>
+      <p>只是還沒被銷毀的那一版</p>
+    </div>
+  </div>
+</div>
+
+<!-- 第四幕 -->
+<div class="layer right top" id="a4">
+  <ul class="rows" id="switches">
+    <li><span>洪水</span><b>關</b></li>
+    <li><span>瘟疫</span><b>關</b></li>
+    <li><span>先知</span><b>關</b></li>
+    <li><span>啟示</span><b>關</b></li>
+    <li><span>戰爭</span><b>關</b></li>
+  </ul>
+</div>
+<div class="layer left cap" id="a4b">
+  <div>
+    <p id="a4note">受試者已自行產生解釋</p>
+    <h2 id="a4h">沒有回應<br>只有調整</h2>
+  </div>
+</div>
+
+<!-- 第五幕 -->
+<div class="layer right top" id="a5">
+  <ul class="rows" id="locks">
+    <li><span>火</span><b>鎖定</b></li>
+    <li><span>文字</span><b>鎖定</b></li>
+    <li><span>電</span><b>鎖定</b></li>
+    <li><span>核能</span><b>鎖定</b></li>
+    <li><span>網路</span><b>鎖定</b></li>
+    <li><span>人工智慧</span><b>鎖定</b></li>
+  </ul>
+</div>
+<div class="layer right cap bottom" id="a5b">
+  <div style="width:min(340px,78vw)">
+    <h2>進步也是<br>實驗的一部分</h2>
+    <p>開放多少　什麼時候開放<br>都不是你決定的</p>
+  </div>
+</div>
+
+<!-- 第六幕 -->
+<div class="layer left cap bottom" id="a6">
+  <div>
+    <h2>地球只是其中一個</h2>
+    <p>艙位 <span id="v-total">0</span>　觀察中 <span id="v-live">0</span>　已終止 <span id="v-dead">0</span><br>沒有人知道終止的條件</p>
+  </div>
+</div>
+
+<!-- 第七幕 -->
+<div class="cover" id="cloud"></div>
+<div class="cover" id="dark"></div>
+<div id="frame"></div>
+<div class="layer cap" id="a7">
+  <ul class="rows" id="you">
+    <li><span>當地時間</span><b id="y-time">--</b></li>
+    <li><span>時區</span><b id="y-zone">--</b></li>
+    <li><span>螢幕</span><b id="y-screen">--</b></li>
+    <li><span>語言</span><b id="y-lang">--</b></li>
+    <li><span>已觀看</span><b id="y-stay">--</b></li>
+  </ul>
+  <div>
+    <h2 id="a7h">觀察對象　就是你</h2>
+    <p id="a7p">實驗仍在進行</p>
+  </div>
+</div>
+
+<div class="cover" id="flash"></div>
 <div class="layer" id="hint">往下捲</div>
-<div class="layer" id="end">第三幕　製作中</div>
 
 <div id="track"></div>
 <script type="module" src="./app.js"></script>
