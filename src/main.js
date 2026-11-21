@@ -57,6 +57,7 @@ const WARM = new THREE.Color(1.0, 0.84, 0.58);
 const COLD = new THREE.Color(0.45, 0.92, 1.0);
 const KILL = new THREE.Color(1.0, 0.25, 0.14);
 const ADD = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending };
+const PI = Math.PI;
 
 /* ---------- 星空 ---------- */
 const stars = (() => {
@@ -117,16 +118,19 @@ const dust = (() => {
   g.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
   const m = new THREE.ShaderMaterial({
     ...ADD,
-    uniforms: { uTime: { value: 0 }, uForm: { value: 0 }, uAlpha: { value: 0 }, uCold: { value: 0 }, uPx: { value: PX } },
+    uniforms: { uTime: { value: 0 }, uForm: { value: 0 }, uAlpha: { value: 0 }, uCold: { value: 0 }, uPx: { value: PX }, uBang: { value: 1 }, uHot: { value: 0 } },
     vertexShader: `
       attribute vec3 aTarget; attribute float aSeed; attribute float aSize;
-      uniform float uTime, uForm, uPx;
-      varying float vR; varying float vSeed;
+      uniform float uTime, uForm, uPx, uBang, uHot;
+      varying float vR; varying float vSeed; varying float vDens;
       mat2 rot(float a){ float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
       void main(){
         float f = clamp(uForm * 1.45 - aSeed * 0.45, 0.0, 1.0);
         f = f * f * (3.0 - 2.0 * f);
-        vec3 p = mix(position, aTarget, f);
+        // 大爆炸：所有粒子從同一個點噴出去，快的先到
+        float bg = clamp(uBang * (0.65 + aSeed * 0.8), 0.0, 1.0);
+        bg = 1.0 - pow(1.0 - bg, 4.0);
+        vec3 p = mix(position * bg, aTarget, f);
         float r = length(aTarget.xz);
         float ang = (1.0 - f) * (2.5 + aSeed * 4.0) + uTime * 0.06 * (1.6 - r / 11.0);
         p.xz = rot(ang) * p.xz;
@@ -134,10 +138,11 @@ const dust = (() => {
         vR = r; vSeed = aSeed;
         vec4 mv = modelViewMatrix * vec4(p, 1.0);
         gl_Position = projectionMatrix * mv;
-        gl_PointSize = aSize * uPx * (16.0 / -mv.z);
+        vDens = smoothstep(0.0, 0.3, bg);
+        gl_PointSize = clamp(aSize * uPx * (70.0 / -mv.z), 1.1 * uPx, 9.0 * uPx) * (1.0 + uHot * 0.8);
       }`,
     fragmentShader: `
-      uniform float uAlpha, uCold; varying float vR; varying float vSeed;
+      uniform float uAlpha, uCold, uHot; varying float vR; varying float vSeed; varying float vDens;
       void main(){
         float d = length(gl_PointCoord - 0.5);
         float a = smoothstep(0.5, 0.0, d);
@@ -145,12 +150,15 @@ const dust = (() => {
         vec3 blue = mix(vec3(0.75, 0.86, 1.0), vec3(0.35, 0.5, 1.0), smoothstep(2.0, 9.0, vR));
         vec3 col = mix(warm, blue, step(0.62, vSeed));
         col = mix(col, vec3(0.35, 0.85, 1.0) * 0.8, uCold);
-        gl_FragColor = vec4(col, a * a * uAlpha * 0.5);
+        col = mix(col, mix(vec3(1.3, 1.25, 1.2), vec3(0.75, 0.9, 1.4), vSeed), uHot);
+        gl_FragColor = vec4(col, a * a * uAlpha * 0.5 * vDens);
       }`,
   });
   const p = new THREE.Points(g, m);
   p.frustumCulled = false;
   p.rotation.x = 0.32;
+  p.position.set(0, 6, -150);
+  p.scale.setScalar(3.4);
   scene.add(p);
   return p;
 })();
@@ -185,6 +193,103 @@ const beam = (() => {
   mesh.frustumCulled = false;
   scene.add(mesh);
   return mesh;
+})();
+
+/* ---------- 大爆炸：奇異點的光與往外推的衝擊波 ---------- */
+const bang = (() => {
+  const m = new THREE.ShaderMaterial({
+    ...ADD, depthTest: false,
+    uniforms: { uGlow: { value: 0 }, uTight: { value: 1000 }, uRing: { value: 0 }, uRingA: { value: 0 } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `
+      uniform float uGlow, uTight, uRing, uRingA; varying vec2 vUv;
+      void main(){
+        vec2 q = (vUv - 0.5) * 2.0;
+        float r = length(q);
+        float core = exp(-r * r * uTight) * uGlow;
+        // 十字星芒，讓那個點看起來是一顆極亮的光源
+        float spike = (exp(-abs(q.y) * 900.0) * exp(-abs(q.x) * 14.0) + exp(-abs(q.x) * 900.0) * exp(-abs(q.y) * 14.0)) * uGlow * 0.5;
+        float ring = exp(-pow((r - uRing) / 0.010, 2.0)) + exp(-pow((r - uRing * 0.62) / 0.02, 2.0)) * 0.45 + exp(-pow((r - uRing * 0.3) / 0.05, 2.0)) * 0.2;
+        ring *= uRingA * smoothstep(1.0, 0.8, r);
+        vec3 col = vec3(1.0, 0.98, 0.95) * (core + spike) + mix(vec3(0.7, 0.85, 1.3), vec3(1.2, 0.8, 0.5), smoothstep(0.0, 0.8, uRing)) * ring;
+        float a = core + spike + ring;
+        gl_FragColor = vec4(col, a);
+      }`,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), m);
+  mesh.scale.setScalar(230);
+  mesh.renderOrder = 6; mesh.frustumCulled = false;
+  scene.add(mesh);
+  return mesh;
+})();
+
+/* ---------- 大爆炸炸出來的其他星球 ---------- */
+const BANG_C = new THREE.Vector3(0, 6, -150); // 爆炸的那一點
+const worlds = (() => {
+  const defs = [
+    // 停下來的位置、半徑、兩個顏色、條紋感（氣態行星高）、有沒有環
+    { p: [-40, 12, -74], r: 6.5, a: [0.85, 0.66, 0.42], b: [0.55, 0.36, 0.2], band: 1, ring: true },
+    { p: [31, -9, -52], r: 3.0, a: [0.72, 0.3, 0.16], b: [0.4, 0.14, 0.08], band: 0 },
+    { p: [-15, -9, -30], r: 1.7, a: [0.55, 0.54, 0.52], b: [0.3, 0.3, 0.3], band: 0 },
+    { p: [24, 15, -98], r: 8.0, a: [0.5, 0.72, 0.85], b: [0.25, 0.42, 0.62], band: 1 },
+    { p: [-64, -6, -112], r: 5.0, a: [0.9, 0.62, 0.3], b: [0.6, 0.3, 0.12], band: 1 },
+    { p: [9.5, 5.5, -21], r: 1.0, a: [0.62, 0.6, 0.56], b: [0.36, 0.35, 0.33], band: 0 },
+    { p: [58, 3, -132], r: 7.0, a: [0.6, 0.5, 0.78], b: [0.3, 0.24, 0.5], band: 1, ring: true },
+    { p: [-22, 24, -142], r: 4.0, a: [0.3, 0.62, 0.55], b: [0.14, 0.34, 0.3], band: 0 },
+    { p: [-7, -4.5, -15], r: 0.6, a: [0.8, 0.5, 0.3], b: [0.45, 0.24, 0.14], band: 0 },
+  ];
+  const list = [];
+  for (const d of defs) {
+    const m = new THREE.ShaderMaterial({
+      transparent: true,
+      uniforms: { uA: { value: new THREE.Color(...d.a) }, uB: { value: new THREE.Color(...d.b) }, uBand: { value: d.band }, uAlpha: { value: 0 }, uHot: { value: 1 }, uSeed: { value: rand() * 50 } },
+      vertexShader: `varying vec3 vN; varying vec3 vP; varying vec3 vV; void main(){ vP = position; vN = normalize(mat3(modelMatrix) * normal); vec4 w = modelMatrix * vec4(position, 1.0); vV = normalize(cameraPosition - w.xyz); gl_Position = projectionMatrix * viewMatrix * w; }`,
+      fragmentShader: `
+        uniform vec3 uA, uB; uniform float uBand, uAlpha, uHot, uSeed; varying vec3 vN; varying vec3 vP; varying vec3 vV;
+        float hash(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+        float vnoise(vec3 x){ vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+                     mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z); }
+        float fbm(vec3 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++){ s += a * vnoise(p); p = p * 2.03 + 11.7; a *= 0.5; } return s; }
+        void main(){
+          vec3 p = normalize(vP);
+          float n = fbm(p * 2.4 + uSeed);
+          float bands = 0.5 + 0.5 * sin(p.y * 14.0 + n * 5.0 + uSeed);
+          float k = mix(smoothstep(0.35, 0.65, n), bands, uBand);
+          vec3 col = mix(uB, uA, k);
+          vec3 L = normalize(vec3(0.55, 0.75, 0.6));
+          float diff = max(dot(vN, L), 0.0);
+          vec3 lit = col * (0.035 + diff * 1.05);
+          lit += col * pow(1.0 - max(dot(vN, vV), 0.0), 3.0) * 0.35 * (0.3 + diff);
+          // 剛炸出來的時候是熔融發亮的
+          float lava = fbm(p * 4.0 + uSeed * 2.0);
+          vec3 molten = mix(vec3(0.9, 0.25, 0.04), vec3(1.35, 0.85, 0.3), smoothstep(0.4, 0.7, lava));
+          lit = mix(lit, molten, uHot);
+          gl_FragColor = vec4(lit, uAlpha);
+        }`,
+    });
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(d.r, 64, 48), m);
+    mesh.rotation.z = (rand() - 0.5) * 0.8;
+    mesh.frustumCulled = false; mesh.visible = false;
+    scene.add(mesh);
+    let ringMat = null;
+    if (d.ring) {
+      ringMat = new THREE.ShaderMaterial({
+        transparent: true, side: THREE.DoubleSide, depthWrite: false,
+        uniforms: { uAlpha: { value: 0 }, uC: { value: new THREE.Color(...d.a) } },
+        vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `uniform float uAlpha; uniform vec3 uC; varying vec2 vUv;
+          void main(){ float r = length(vUv - 0.5) * 2.0; if (r < 0.56 || r > 1.0) discard; float t = (r - 0.56) / 0.44;
+            float bandsR = 0.55 + 0.45 * sin(t * 46.0) * sin(t * 13.0 + 1.0); float gap = smoothstep(0.02, 0.05, abs(t - 0.58));
+            gl_FragColor = vec4(uC * (0.5 + 0.5 * bandsR), bandsR * gap * 0.75 * uAlpha * smoothstep(0.0, 0.06, t) * smoothstep(1.0, 0.92, t)); }`,
+      });
+      const ring = new THREE.Mesh(new THREE.PlaneGeometry(d.r * 4.6, d.r * 4.6), ringMat);
+      ring.rotation.x = -PI / 2 + 0.35;
+      mesh.add(ring);
+    }
+    list.push({ mesh, m, ringMat, rest: new THREE.Vector3(...d.p), speed: 0.75 + rand() * 0.5 });
+  }
+  return list;
 })();
 
 /* ---------- 星球 ---------- */
@@ -451,7 +556,6 @@ class Ink {
     return l;
   }
 }
-const PI = Math.PI;
 
 /* ---------- 五輪的代表生物：畫成化石標本 ---------- */
 const fossils = (() => {
@@ -935,7 +1039,7 @@ const el = {
   a8: $('a8'), you: q('#you li'), a8h: $('a8h'), a8p: $('a8p'),
   yTime: $('y-time'), yZone: $('y-zone'), yScreen: $('y-screen'), yLang: $('y-lang'), yStay: $('y-stay'),
 };
-const FINAL_ID = '000006';
+const FINAL_ID = 'EARTH';
 let lastIdTick = 0;
 const row = (li, v) => { setO(li, v); li.style.transform = `translateY(${((1 - v) * 8).toFixed(1)}px)`; };
 const cls = (node, name, on) => { if (node.classList.contains(name) !== on) node.classList.toggle(name, on); };
@@ -1041,6 +1145,7 @@ const cRight = new THREE.Vector3(), cUp = new THREE.Vector3(), cFwd = new THREE.
 const tmpColor = new THREE.Color();
 // 把一個全息物件固定在畫面上的某個位置（fx、fy 是 -1~1 的畫面座標），大小跟著畫面高度
 const HOLO_D = 10;
+const SHOW_FOSSILS = false; // 線稿版化石先拿掉，等換成實體模型
 const anchor = (obj, fx, fy, scale) => {
   const halfH = TAN * HOLO_D, halfW = halfH * camera.aspect;
   obj.position.copy(camera.position).addScaledVector(cFwd, HOLO_D).addScaledVector(cRight, fx * halfW).addScaledVector(cUp, fy * halfH);
@@ -1072,14 +1177,51 @@ function frame() {
   cUp.setFromMatrixColumn(camera.matrixWorld, 1);
   cFwd.setFromMatrixColumn(camera.matrixWorld, 2).negate();
 
+  /* ---- 第一幕：一個小點 → 大爆炸 → 炸出許多星球 → 地球朝鏡頭飛來 ---- */
+  const BANG = 0.12, in1 = p < B[1];
+  const fly = clamp01((a - BANG) / 0.47), flyE = 1 - Math.pow(1 - fly, 3); // 地球從爆炸點飛到定位
+  if (in1) {
+    // 一開始看著那個點，地球飛近之後視線跟到地球上
+    lookAt.copy(BANG_C).multiplyScalar(1 - sstep(0.3, 0.66, a));
+    camera.lookAt(lookAt);
+    const shake = gauss(a, BANG + 0.012, 0.018) * 0.3; // 爆開的瞬間鏡頭震一下
+    if (shake > 0.001) { camera.position.x += Math.sin(t * 61) * shake; camera.position.y += Math.cos(t * 53) * shake; }
+    camera.updateMatrixWorld();
+    cRight.setFromMatrixColumn(camera.matrixWorld, 0); cUp.setFromMatrixColumn(camera.matrixWorld, 1); cFwd.setFromMatrixColumn(camera.matrixWorld, 2).negate();
+  }
+  {
+    const before = a < BANG, pre = sstep(0.015, BANG - 0.004, a), ringR = sstep(BANG, BANG + 0.3, a);
+    const bm = bang.material.uniforms;
+    bm.uGlow.value = in1 ? (before ? pre * (0.75 + 0.25 * Math.sin(t * 5.0)) : (1 - sstep(BANG, BANG + 0.16, a)) * 1.5) : 0;
+    bm.uTight.value = before ? lerp(140000, 26000, pre) : lerp(5000, 220, sstep(BANG, BANG + 0.05, a));
+    bm.uRing.value = ringR;
+    bm.uRingA.value = !before && in1 ? Math.pow(1 - ringR, 2) * 1.1 : 0;
+    bang.visible = bm.uGlow.value > 0.001 || bm.uRingA.value > 0.001;
+    bang.position.copy(BANG_C);
+    bang.quaternion.copy(camera.quaternion);
+  }
+  // 其他星球：從同一點飛出去，各自減速停在遠處；第二幕發現是艙壁之後淡掉
+  const worldsA = sstep(BANG + 0.004, BANG + 0.03, a) * (1 - sstep(0.1, 0.55, b));
+  for (const w of worlds) {
+    w.mesh.visible = worldsA > 0.002;
+    if (!w.mesh.visible) continue;
+    const u = clamp01((a - BANG) / 0.5 * w.speed), e2 = 1 - Math.pow(1 - u, 3);
+    w.mesh.position.copy(BANG_C).lerp(w.rest, e2);
+    w.mesh.rotation.y = t * 0.03;
+    w.m.uniforms.uAlpha.value = worldsA;
+    w.m.transparent = worldsA < 0.999;
+    w.m.uniforms.uHot.value = 1 - sstep(0.15, 0.7, u);
+    if (w.ringMat) w.ringMat.uniforms.uAlpha.value = worldsA * sstep(0.4, 0.9, u);
+  }
+
   /* ---- 那道光 ---- */
-  const crack = sstep(0.02, 0.10, a);
-  const open = sstep(0.11, 0.24, a);
+  const crack = sstep(0.62, 0.86, a);
+  const open = 1;
   const bu = beam.material.uniforms;
   bu.uTime.value = t;
   bu.uWidth.value = lerp(lerp(0.02, 1.0, open) * lerp(1.0, 0.5, sstep(0.5, 0.95, a)) * lerp(1.0, 0.8, cold), 1.0, back);
   bu.uI.value = lerp(crack * lerp(1.0, 1.15, open) * lerp(1.0, 0.5, sstep(0.5, 0.95, a)) * lerp(1.0, 1.3, cold) * (1 + killing * 0.35), 1.15, back);
-  bu.uBottom.value = lerp(lerp(-60, PLANET_R * 0.98, sstep(0.5, 0.8, a)), -60, back);
+  bu.uBottom.value = lerp(PLANET_R * 0.98, -60, back);
   bu.uTop.value = lerp(BEAM_TOP, 80, back);
   tmpColor.copy(WARM).lerp(COLD, cold).lerp(KILL, killing * 0.85).lerp(WARM, back);
   bu.uColor.value.copy(tmpColor);
@@ -1087,12 +1229,14 @@ function frame() {
 
   /* ---- 星空、塵埃 ---- */
   stars.material.uniforms.uTime.value = t;
-  stars.material.uniforms.uAlpha.value = sstep(0.13, 0.4, a) * lerp(lerp(1, 0.08, sstep(0.1, 0.6, b)), 1, back);
+  stars.material.uniforms.uAlpha.value = sstep(BANG + 0.01, BANG + 0.2, a) * lerp(lerp(1, 0.08, sstep(0.1, 0.6, b)), 1, back);
   stars.rotation.y = t * 0.004;
   const du = dust.material.uniforms;
   du.uTime.value = t;
-  du.uForm.value = sstep(0.16, 0.74, a);
-  du.uAlpha.value = sstep(0.12, 0.3, a) * lerp(1, 0.55, sstep(0.7, 1, a)) * lerp(1, 0.35, sstep(0.2, 0.8, b)) * (1 - sstep(0.0, 0.1, c));
+  du.uForm.value = 0;
+  du.uBang.value = sstep(BANG, BANG + 0.42, a);
+  du.uHot.value = 1 - sstep(BANG + 0.01, BANG + 0.2, a);
+  du.uAlpha.value = sstep(BANG - 0.001, BANG + 0.006, a) * lerp(1, 0.55, sstep(0.5, 0.9, a)) * (1 - sstep(0.1, 0.55, b));
   du.uCold.value = cold;
   dust.visible = du.uAlpha.value > 0.002;
 
@@ -1102,7 +1246,7 @@ function frame() {
   const lock = sstep(0.68, 0.95, v3) * (1 - sstep(0.1, 0.3, f)); // 最後把環收緊、變紅
 
   /* ---- 星球 ---- */
-  const reveal = sstep(0.52, 0.96, a);
+  const reveal = sstep(BANG, 0.8, a);
   const pu = planet.material.uniforms;
   pu.uTime.value = t; pu.uReveal.value = reveal; pu.uCold.value = cold; pu.uFade.value = 1 - gone;
   planet.visible = gone < 0.999;
@@ -1113,11 +1257,10 @@ function frame() {
   pu.uWar.value = pulse(d, 0.68, 0.92, 0.05);
   pu.uSpark.value = sstep(0.42, 0.8, v3);
   planet.rotation.y = t * 0.035;
-  const sc = lerp(0.35, 1, sstep(0.52, 0.8, a));
-  planet.scale.setScalar(sc);
-  atmo.scale.setScalar(sc);
+  planet.position.copy(BANG_C).multiplyScalar(1 - flyE);
+  atmo.position.copy(planet.position);
   atmo.material.uniforms.uReveal.value = reveal * (1 - gone);
-  atmo.material.uniforms.uHot.value = 1 - sstep(0.3, 0.9, sstep(0.52, 0.96, a));
+  atmo.material.uniforms.uHot.value = 1 - sstep(0.3, 0.9, reveal);
   atmo.material.uniforms.uKill.value = killing * (rs.type >= 2 ? 0.6 : 0.15);
 
   /* ---- 隕石 ---- */
@@ -1134,7 +1277,7 @@ function frame() {
     meteor.material.opacity = sstep(0, 0.15, k);
   } else meteor.material.opacity = 0;
   const impactFlash = (inAct3 && rs.r === 4) ? gauss(rs.u, 0.575, 0.012) * 0.75 : 0;
-  const flashV = gauss(a, 0.125, 0.028) * 0.7 * (p < B[1] ? 1 : 0) + impactFlash + gauss(v1, 0.9, 0.03) * 0.3 * (stage === 0 ? 1 : 0);
+  const flashV = gauss(a, BANG + 0.003, 0.007) * 0.9 * (in1 ? 1 : 0) + impactFlash + gauss(v1, 0.9, 0.03) * 0.3 * (stage === 0 ? 1 : 0);
   setO(el.flash, flashV);
 
   /* ---- 第三幕：演化樹、化石、DNA ---- */
@@ -1147,7 +1290,7 @@ function frame() {
   evo.cuts.forEach((m, r) => { m.opacity = (rs.killT > r ? sstep(r, r + 0.3, rs.killT) : 0) * 0.7 * a3on * (narrow ? 0 : 1); });
   if (narrow) anchor(fossils.grp, 0, 0.56, 0.085); else anchor(fossils.grp, 0.6, 0.42, 0.15);
   fossils.list.forEach((fo, i) => {
-    const on = inAct3 && rs.r === i && rs.u > 0.1 && rs.u < 0.88;
+    const on = SHOW_FOSSILS && inAct3 && rs.r === i && rs.u > 0.1 && rs.u < 0.88;
     fo.l.visible = on;
     if (on) { fo.mat.uniforms.uDraw.value = sstep(0.12, 0.46, rs.u) * 1.001; fo.mat.uniforms.uBreak.value = sstep(0.6, 0.86, rs.u); }
   });
@@ -1221,7 +1364,7 @@ function frame() {
   setT(el.vWater, Math.round(71 * kk) + '%');
   setT(el.vG, (9.81 * kk).toFixed(2) + ' m/s²');
   if (b < 0.8) {
-    if (t - lastIdTick > 0.06) { lastIdTick = t; el.id.textContent = Array.from({ length: 6 }, () => Math.floor(Math.random() * 10)).join(''); }
+    if (t - lastIdTick > 0.06) { lastIdTick = t; el.id.textContent = Array.from({ length: 5 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join(''); }
   } else setT(el.id, FINAL_ID);
 
   // 第三幕
