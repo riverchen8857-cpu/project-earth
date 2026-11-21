@@ -14,26 +14,26 @@
   html, body { background: #000; color: #fff; }
   body { font-family: "Noto Sans TC", system-ui, sans-serif; overflow-x: hidden; }
   #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-  #track { position: relative; height: 3400vh; }
+  #track { position: relative; height: 4200vh; }
 
   .layer { position: fixed; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; opacity: 0; }
   .cover { position: fixed; inset: 0; pointer-events: none; opacity: 0; }
-  #flash, #cloud { background: #fff; }
+  #flash { background: #fff; }
   #dark { background: #000; }
 
-  /* 第一幕：神聖 */
-  #line1 { text-align: center; align-items: flex-end; padding-bottom: 11vh; }
-  #line1 h1 {
+  /* 神聖的字（第一幕、結尾前） */
+  .holy { text-align: center; align-items: flex-end; padding-bottom: 11vh; }
+  .holy h1 {
     font-family: "Noto Serif TC", serif; font-weight: 700;
     font-size: clamp(28px, 4.6vw, 66px); letter-spacing: .32em; text-indent: .32em;
     color: var(--warm); text-shadow: 0 0 40px rgba(255, 214, 140, .55);
   }
-  #line1 p {
+  .holy p {
     margin-top: 24px; font-family: "Noto Serif TC", serif;
     font-size: clamp(14px, 1.5vw, 20px); letter-spacing: .6em; text-indent: .6em; color: rgba(255, 236, 200, .7);
   }
 
-  /* 之後各幕共用：冷色大字、資料列 */
+  /* 冷色大字、資料列 */
   .cap h2 {
     font-weight: 500; font-size: clamp(24px, 3.2vw, 46px); line-height: 1.4; letter-spacing: .12em; color: var(--cold);
     text-shadow: 0 0 24px rgba(127, 233, 255, .5); font-variant-numeric: tabular-nums;
@@ -44,72 +44,71 @@
   .top { align-items: flex-start; padding-top: 12vh; }
   .bottom { align-items: flex-end; padding-bottom: 11vh; }
 
-  .rows { list-style: none; width: min(340px, 78vw); }
+  .rows { list-style: none; width: min(380px, 82vw); }
   .rows li {
-    display: flex; justify-content: space-between; gap: 16px; padding: 12px 0;
+    display: flex; justify-content: space-between; gap: 16px; padding: 11px 0;
     border-bottom: 1px solid var(--line);
-    font-size: 14px; letter-spacing: .14em; color: rgba(200, 244, 255, .82);
+    font-size: 14px; letter-spacing: .12em; color: rgba(200, 244, 255, .82);
     opacity: 0; transform: translateY(8px); font-variant-numeric: tabular-nums;
   }
-  .rows li b { font-weight: 500; color: rgba(200, 244, 255, .45); transition: color .3s, text-shadow .3s; }
-  .rows li.on b { color: var(--cold); text-shadow: 0 0 12px rgba(127, 233, 255, .6); }
-  #hud li b, #you li b { color: var(--cold); }
+  .rows li b { font-weight: 500; color: var(--cold); text-align: right; transition: color .3s, text-shadow .3s; }
+  .rows li.idle b { color: rgba(200, 244, 255, .4); }
+  .rows li.kill b { color: var(--kill); text-shadow: 0 0 14px rgba(255, 106, 85, .6); }
 
-  /* 第三幕：輪次 */
-  #rounds { list-style: none; }
-  #rounds li {
-    display: flex; gap: 1.2em; align-items: baseline; padding: 9px 0; opacity: 0;
-    font-size: clamp(16px, 1.7vw, 24px); letter-spacing: .2em; color: rgba(200, 244, 255, .85);
-  }
-  #rounds li span { color: var(--cold); }
-  #rounds li b { font-weight: 400; }
-  #rounds li i { font-style: normal; color: var(--kill); opacity: 0; text-shadow: 0 0 14px rgba(255, 106, 85, .6); }
-  #a3end { margin-top: 5vh; opacity: 0; }
-
+  #humanTag { position: fixed; left: 0; top: 0; font-size: 13px; letter-spacing: .3em; color: var(--warm); text-shadow: 0 0 12px rgba(255, 214, 140, .7); opacity: 0; pointer-events: none; white-space: nowrap; }
   #a4note { margin: 0 0 3vh; opacity: 0; }
   #a4h { opacity: 0; }
+  #e2 { text-align: center; }
+  #e2 h2 { font-size: clamp(26px, 4vw, 58px); letter-spacing: .24em; text-indent: .24em; }
 
-  /* 第七幕：框住訪客 */
+  /* 被監視：四角取景框、觀察計時 */
+  #watch { position: fixed; inset: 3.5vmin; pointer-events: none; opacity: 0; }
+  #watch i { position: absolute; width: 26px; height: 26px; border: 1px solid rgba(127, 233, 255, .75); }
+  #watch i:nth-child(1) { left: 0; top: 0; border-right: 0; border-bottom: 0; }
+  #watch i:nth-child(2) { right: 0; top: 0; border-left: 0; border-bottom: 0; }
+  #watch i:nth-child(3) { left: 0; bottom: 0; border-right: 0; border-top: 0; }
+  #watch i:nth-child(4) { right: 0; bottom: 0; border-left: 0; border-top: 0; }
+  #watch span { position: absolute; left: 14px; top: 10px; font-size: 12px; letter-spacing: .28em; color: rgba(127, 233, 255, .8); font-variant-numeric: tabular-nums; }
   #frame { position: fixed; inset: 3.5vmin; border: 1px solid rgba(127, 233, 255, .7); box-shadow: 0 0 24px rgba(127, 233, 255, .25), inset 0 0 24px rgba(127, 233, 255, .12); pointer-events: none; opacity: 0; }
-  #a7 { flex-direction: column; gap: 5vh; text-align: center; }
-  #a7 .rows { width: min(360px, 78vw); text-align: left; }
-  #a7 h2 { font-size: clamp(28px, 4.4vw, 64px); letter-spacing: .2em; text-indent: .2em; opacity: 0; }
-  #a7 p { opacity: 0; letter-spacing: .5em; text-indent: .5em; }
+  #a8 { flex-direction: column; gap: 5vh; text-align: center; }
+  #a8 .rows { width: min(360px, 78vw); text-align: left; }
+  #a8 h2 { font-size: clamp(28px, 4.4vw, 64px); letter-spacing: .2em; text-indent: .2em; opacity: 0; }
+  #a8 p { opacity: 0; letter-spacing: .5em; text-indent: .5em; }
 
   #hint { align-items: flex-end; padding-bottom: 5vh; font-size: 13px; letter-spacing: .5em; text-indent: .5em; color: rgba(255,255,255,.55); }
 
   @media (max-width: 767px) {
     .left, .right { padding-left: 16px; padding-right: 16px; }
-    .top { padding-top: 8vh; }
+    .top { padding-top: 9vh; }
     .bottom { padding-bottom: 8vh; }
-    .rows li { padding: 8px 0; font-size: 13px; }
-    #line2, #a4b, #a5b, #a6 { align-items: flex-end; padding-bottom: 8vh; }
-    #a3 { align-items: flex-start; padding-top: 7vh; }
-    #rounds li { padding: 5px 0; }
-    #a3end { margin-top: 2vh; }
+    .rows li { padding: 7px 0; font-size: 12.5px; }
+    #line2, #a4b, #a5b { align-items: flex-end; padding-bottom: 8vh; }
+    #watch span { font-size: 11px; }
   }
 </style>
 </head>
 <body>
 <canvas id="scene"></canvas>
 
-<!-- 第一幕 -->
-<div class="layer" id="line1">
+<!-- 第一幕：創世 -->
+<div class="layer holy" id="line1">
   <div>
     <h1>起初 神創造天地</h1>
     <p>地是空虛混沌 淵面黑暗</p>
   </div>
 </div>
 
-<!-- 第二幕 -->
+<!-- 第二幕：拉遠 -->
 <div class="layer right top" id="hud">
   <ul class="rows">
     <li><span>專案</span><b>地球</b></li>
-    <li><span>光束校準</span><b id="v-beam">0.00%</b></li>
-    <li><span>大氣合成</span><b id="v-air">0.00%</b></li>
-    <li><span>軌道穩定</span><b id="v-orbit">0.00%</b></li>
+    <li><span>軌道半徑</span><b id="v-au">0.000 AU</b></li>
+    <li><span>公轉週期</span><b id="v-year">0.000 日</b></li>
+    <li><span>軸傾角</span><b id="v-tilt">0.00°</b></li>
+    <li><span>大氣成分</span><b id="v-air">氮 0.00%　氧 0.00%</b></li>
+    <li><span>表面液態水</span><b id="v-water">0%</b></li>
+    <li><span>表面重力</span><b id="v-g">0.00 m/s²</b></li>
     <li><span>受試物種</span><b>待投放</b></li>
-    <li><span>觀察者</span><b>在線</b></li>
   </ul>
 </div>
 <div class="layer left cap" id="line2">
@@ -119,32 +118,34 @@
   </div>
 </div>
 
-<!-- 第三幕 -->
-<div class="layer left cap" id="a3">
+<!-- 第三幕：五次銷毀 -->
+<div class="layer right bottom" id="a3">
+  <ul class="rows" id="round">
+    <li><span>輪次</span><b id="r-n">—</b></li>
+    <li><span>年代</span><b id="r-era">—</b></li>
+    <li><span>標本</span><b id="r-spec">—</b></li>
+    <li><span>方式</span><b id="r-how">—</b></li>
+    <li><span>物種損失</span><b id="r-loss">—</b></li>
+    <li><span>狀態</span><b id="r-state">—</b></li>
+  </ul>
+</div>
+<div class="layer left cap bottom" id="a3end">
   <div>
-    <ol id="rounds">
-      <li><span>第一輪</span><b>投放</b><i>銷毀</i></li>
-      <li><span>第二輪</span><b>投放</b><i>銷毀</i></li>
-      <li><span>第三輪</span><b>投放</b><i>銷毀</i></li>
-      <li><span>第四輪</span><b>投放</b><i>銷毀</i></li>
-      <li><span>第五輪</span><b>統治一億六千萬年</b><i>銷毀</i></li>
-      <li><span>第六輪</span><b>投放</b></li>
-    </ol>
-    <div id="a3end">
-      <h2>人類不是被選中的</h2>
-      <p>只是還沒被銷毀的那一版</p>
-    </div>
+    <h2>人類不是被選中的</h2>
+    <p>只是還沒被銷毀的那一輪</p>
   </div>
 </div>
+<div id="humanTag">人類</div>
 
-<!-- 第四幕 -->
+<!-- 第四幕：祈禱 -->
 <div class="layer right top" id="a4">
-  <ul class="rows" id="switches">
-    <li><span>洪水</span><b>關</b></li>
-    <li><span>瘟疫</span><b>關</b></li>
-    <li><span>先知</span><b>關</b></li>
-    <li><span>啟示</span><b>關</b></li>
-    <li><span>戰爭</span><b>關</b></li>
+  <ul class="rows" id="pray">
+    <li><span>訊號來源</span><b>累計約 1,170 億人</b></li>
+    <li><span>上行訊號</span><b>接收中</b></li>
+    <li><span>回應</span><b>0</b></li>
+    <li class="idle"><span>海平面　+120 公尺</span><b>待命</b></li>
+    <li class="idle"><span>病原體　釋放</span><b>待命</b></li>
+    <li class="idle"><span>衝突　觸發</span><b>待命</b></li>
   </ul>
 </div>
 <div class="layer left cap" id="a4b">
@@ -154,47 +155,55 @@
   </div>
 </div>
 
-<!-- 第五幕 -->
-<div class="layer right top" id="a5">
-  <ul class="rows" id="locks">
-    <li><span>火</span><b>鎖定</b></li>
-    <li><span>文字</span><b>鎖定</b></li>
-    <li><span>電</span><b>鎖定</b></li>
-    <li><span>核能</span><b>鎖定</b></li>
-    <li><span>網路</span><b>鎖定</b></li>
-    <li><span>人工智慧</span><b>鎖定</b></li>
+<!-- 第五幕：壓制 -->
+<div class="layer left top" id="a5">
+  <ul class="rows" id="press">
+    <li><span>物件</span><b id="s-obj">—</b></li>
+    <li><span>事件</span><b id="s-evt">—</b></li>
+    <li><span>判定</span><b id="s-judge">—</b></li>
+    <li><span>處置</span><b id="s-act">—</b></li>
   </ul>
 </div>
-<div class="layer right cap bottom" id="a5b">
-  <div style="width:min(340px,78vw)">
-    <h2>進步也是<br>實驗的一部分</h2>
-    <p>開放多少　什麼時候開放<br>都不是你決定的</p>
+<div class="layer left cap bottom" id="a5b">
+  <div>
+    <h2>全能的神<br>不需要防著人類</h2>
   </div>
 </div>
 
-<!-- 第六幕 -->
+<!-- 第六幕：其他實驗場 -->
 <div class="layer left cap bottom" id="a6">
   <div>
     <h2>地球只是其中一個</h2>
-    <p>艙位 <span id="v-total">0</span>　觀察中 <span id="v-live">0</span>　已終止 <span id="v-dead">0</span><br>沒有人知道終止的條件</p>
   </div>
 </div>
 
-<!-- 第七幕 -->
-<div class="cover" id="cloud"></div>
+<!-- 第七幕：回到那道光 -->
+<div class="layer holy" id="e1" style="padding-bottom:26vh">
+  <div>
+    <h1>你們叫祂　神</h1>
+  </div>
+</div>
+<div class="layer cap bottom" id="e2">
+  <div>
+    <h2>祂叫你們　第六輪</h2>
+  </div>
+</div>
+
+<!-- 第八幕：你 -->
 <div class="cover" id="dark"></div>
+<div id="watch"><i></i><i></i><i></i><i></i><span id="w-tag">觀察中　00:00</span></div>
 <div id="frame"></div>
-<div class="layer cap" id="a7">
+<div class="layer cap" id="a8">
   <ul class="rows" id="you">
     <li><span>當地時間</span><b id="y-time">--</b></li>
     <li><span>時區</span><b id="y-zone">--</b></li>
     <li><span>螢幕</span><b id="y-screen">--</b></li>
     <li><span>語言</span><b id="y-lang">--</b></li>
-    <li><span>已觀看</span><b id="y-stay">--</b></li>
+    <li><span>已觀察</span><b id="y-stay">--</b></li>
   </ul>
   <div>
-    <h2 id="a7h">觀察對象　就是你</h2>
-    <p id="a7p">實驗仍在進行</p>
+    <h2 id="a8h">觀察對象　就是你</h2>
+    <p id="a8p">實驗仍在進行</p>
   </div>
 </div>
 
