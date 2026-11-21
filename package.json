@@ -1,0 +1,24 @@
+{
+  "name": "project-earth",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/riverchen8857-cpu/project-earth.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/riverchen8857-cpu/project-earth/issues"
+  },
+  "homepage": "https://github.com/riverchen8857-cpu/project-earth#readme",
+  "dependencies": {
+    "esbuild": "^0.28.2",
+    "three": "^0.187.0"
+  }
+}

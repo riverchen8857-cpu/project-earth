@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>地球專案</title>
+<meta name="description" content="起初，神創造天地。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --cold: #7fe9ff; --warm: #ffe2a8; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #000; color: #fff; }
+  body { font-family: "Noto Sans TC", system-ui, sans-serif; overflow-x: hidden; }
+  #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+  #track { position: relative; height: 900vh; }
+
+  .layer { position: fixed; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; }
+
+  /* 第一幕：神聖 */
+  #line1 { opacity: 0; text-align: center; align-items: flex-end; padding-bottom: 11vh; }
+  #line1 h1 {
+    font-family: "Noto Serif TC", serif; font-weight: 700;
+    font-size: clamp(28px, 4.6vw, 66px); letter-spacing: .32em; text-indent: .32em;
+    color: var(--warm); text-shadow: 0 0 40px rgba(255, 214, 140, .55);
+  }
+  #line1 p {
+    margin-top: 24px; font-family: "Noto Serif TC", serif;
+    font-size: clamp(14px, 1.5vw, 20px); letter-spacing: .6em; text-indent: .6em; color: rgba(255, 236, 200, .7);
+  }
+
+  /* 第二幕：冰冷 */
+  #line2 { opacity: 0; align-items: center; justify-content: flex-start; padding: 0 6vw; }
+  #line2 h2 {
+    font-weight: 500; font-size: clamp(24px, 3.2vw, 46px); line-height: 1.4; letter-spacing: .12em; color: var(--cold);
+    text-shadow: 0 0 24px rgba(127, 233, 255, .5); font-variant-numeric: tabular-nums;
+  }
+  #line2 p { margin-top: 12px; font-size: clamp(13px, 1.3vw, 18px); letter-spacing: .3em; color: rgba(190, 240, 255, .7); }
+
+  #hud { align-items: flex-start; justify-content: flex-end; padding: 12vh 6vw 0; }
+  #hud ul { list-style: none; width: min(340px, 78vw); }
+  #hud li {
+    display: flex; justify-content: space-between; gap: 16px; padding: 12px 0;
+    border-bottom: 1px solid rgba(127, 233, 255, .22);
+    font-size: 14px; letter-spacing: .14em; color: rgba(200, 244, 255, .82);
+    opacity: 0; transform: translateY(8px); font-variant-numeric: tabular-nums;
+  }
+  #hud li b { font-weight: 500; color: var(--cold); }
+
+  #hint { align-items: flex-end; padding-bottom: 5vh; font-size: 13px; letter-spacing: .5em; text-indent: .5em; color: rgba(255,255,255,.55); }
+  #end { opacity: 0; align-items: flex-end; padding-bottom: 5vh; font-size: 13px; letter-spacing: .4em; text-indent: .4em; color: rgba(190, 240, 255, .6); }
+
+  @media (max-width: 767px) {
+    #hud { padding: 9vh 16px 0; }
+    #line2 { align-items: flex-end; padding: 0 16px 9vh; }
+    #hud li { padding: 8px 0; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div id="flash"></div>
+
+<div class="layer" id="line1">
+  <div>
+    <h1>起初 神創造天地</h1>
+    <p>地是空虛混沌 淵面黑暗</p>
+  </div>
+</div>
+
+<div class="layer" id="hud">
+  <ul>
+    <li><span>專案</span><b>地球</b></li>
+    <li><span>光束校準</span><b id="v-beam">0.00%</b></li>
+    <li><span>大氣合成</span><b id="v-air">0.00%</b></li>
+    <li><span>軌道穩定</span><b id="v-orbit">0.00%</b></li>
+    <li><span>受試物種</span><b>待投放</b></li>
+    <li><span>觀察者</span><b>在線</b></li>
+  </ul>
+</div>
+
+<div class="layer" id="line2">
+  <div>
+    <h2>專案編號 <span id="v-id">000000</span><br>啟動中</h2>
+    <p>這裡沒有天堂　這是一間實驗艙</p>
+  </div>
+</div>
+
+<div class="layer" id="hint">往下捲</div>
+<div class="layer" id="end">第三幕　製作中</div>
+
+<div id="track"></div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
