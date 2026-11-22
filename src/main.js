@@ -364,18 +364,18 @@ const webNodes = (() => {
 const bgGal = (() => {
   const pts = [];
   for (const nd of webNodes.nodes) pts.push(nd.clone());
-  for (let i = 0; i < 520; i++) {
+  for (let i = 0; i < (isMobile ? 1500 : 3600); i++) {
     const e = webNodes.edges[Math.floor(Math.random() * webNodes.edges.length)];
     const p = webNodes.nodes[e[0]].clone().lerp(e[1] < 0 ? GAL_C : webNodes.nodes[e[1]], 0.08 + Math.random() * 0.84);
     if (p.distanceTo(GAL_C) < 1300 || p.clone().sub(GAL_C).normalize().dot(DIR5) > 0.72) continue;
-    pts.push(p.add(V3(gr() * 70, gr() * 70, gr() * 70)));
+    pts.push(p.add(V3(gr() * 110, gr() * 110, gr() * 110)));
   }
-  for (let i = 0; i < 260; i++) {
-    const u = Math.random() * 2 - 1, th = Math.random() * PI * 2, r = 4200 + Math.random() * 2600, s = Math.sqrt(1 - u * u);
+  for (let i = 0; i < (isMobile ? 900 : 2200); i++) {
+    const u = Math.random() * 2 - 1, th = Math.random() * PI * 2, r = 3800 + Math.random() * 4200, s = Math.sqrt(1 - u * u);
     pts.push(V3(r * s * Math.cos(th), r * u, r * s * Math.sin(th)).add(GAL_C));
   }
   const n = pts.length, pos = new Float32Array(n * 3), seed = new Float32Array(n), size = new Float32Array(n), shape = new Float32Array(n * 2);
-  pts.forEach((p, i) => { pos.set([p.x, p.y, p.z], i * 3); seed[i] = Math.random(); size[i] = 60 + Math.pow(Math.random(), 2) * 190; shape.set([Math.random() * PI * 2, 0.28 + Math.random() * 0.72], i * 2); });
+  pts.forEach((p, i) => { pos.set([p.x, p.y, p.z], i * 3); seed[i] = Math.random(); size[i] = 12 + Math.pow(Math.random(), 7) * 170; shape.set([Math.random() * PI * 2, 0.28 + Math.random() * 0.72], i * 2); });
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
@@ -385,7 +385,7 @@ const bgGal = (() => {
     ...ADD,
     uniforms: { uAlpha: { value: 0 }, uIgnite: { value: 1 }, uGrow: { value: 1 }, uBang: { value: 0 }, uC: { value: GAL_C.clone() }, uH: { value: 1 }, uPx: { value: PX }, uTime: { value: 0 } },
     vertexShader: `attribute float aSeed, aSize; attribute vec2 aShape; uniform float uIgnite, uGrow, uBang, uH, uPx, uTime; uniform vec3 uC;
-      varying float vLit, vGrow, vSeed; varying vec2 vShape;
+      varying float vLit, vGrow, vSeed, vSmall; varying vec2 vShape;
       void main(){
         vSeed = aSeed; vShape = aShape;
         vLit = smoothstep(aSeed * 0.92, aSeed * 0.92 + 0.05, uIgnite);
@@ -393,21 +393,26 @@ const bgGal = (() => {
         vLit *= 1.0 + (1.0 - vGrow) * 0.35 * sin(uTime * (1.5 + aSeed * 3.0) + aSeed * 60.0);
         float e = 1.0 - pow(1.0 - clamp(uBang * (0.75 + aSeed * 0.5), 0.0, 1.0), 3.0); // 從同一點飛出去，快的先到
         vec4 mv = modelViewMatrix * vec4(mix(uC, position, e), 1.0); gl_Position = projectionMatrix * mv;
-        gl_PointSize = clamp(aSize * uH / -mv.z, 4.0 * uPx, 90.0 * uPx);
+        gl_PointSize = clamp(aSize * uH / -mv.z, 2.0 * uPx, 64.0 * uPx);
+        vSmall = 1.0 - smoothstep(3.0 * uPx, 9.0 * uPx, gl_PointSize);
       }`,
-    fragmentShader: `uniform float uAlpha; varying float vLit, vGrow, vSeed; varying vec2 vShape;
+    fragmentShader: `uniform float uAlpha; varying float vLit, vGrow, vSeed, vSmall; varying vec2 vShape;
       ${ROT2}
       void main(){
-        vec2 q = rot(vShape.x) * ((gl_PointCoord - 0.5) * 2.0); q.y /= vShape.y;
+        vec2 q0 = (gl_PointCoord - 0.5) * 2.0;
+        vec2 q = rot(vShape.x) * q0; q.y /= vShape.y;
         float r = length(q);
-        float core = exp(-r * r * mix(90.0, 26.0, vGrow));
+        float kind = vSeed < 0.15 ? 0.0 : vSeed < 0.45 ? 1.0 : 2.0; // 遠處偏紅的、黃色橢圓、藍白旋渦
+        float core = exp(-r * r * (kind > 1.5 ? 34.0 : 14.0));
         float th = atan(q.y, q.x);
         float arms = 0.5 + 0.5 * cos(2.0 * th + 6.5 * log(r + 0.06));
-        float spiral = step(0.35, vSeed);
-        float disk = exp(-r * 3.4) * mix(1.0, 0.25 + 0.95 * arms, spiral) * smoothstep(1.0, 0.6, r) * vGrow;
-        vec3 warm = vec3(1.0, 0.84, 0.6), blue = vec3(0.6, 0.76, 1.0);
-        vec3 col = warm * core * 0.8 + mix(warm, blue, spiral * smoothstep(0.1, 0.5, r)) * disk * 0.7;
-        gl_FragColor = vec4(col * vLit * uAlpha, 1.0);
+        float disk = kind > 1.5 ? exp(-r * 3.4) * (0.2 + 1.0 * arms) * smoothstep(1.0, 0.6, r) : 0.0;
+        vec3 warm = kind < 0.5 ? vec3(1.0, 0.5, 0.36) : vec3(1.0, 0.84, 0.6);
+        vec3 col = warm * core * 0.5 + vec3(0.62, 0.76, 1.0) * disk * 0.55;
+        // 很小的就只是一個光點
+        float dot0 = smoothstep(1.0, 0.0, length(q0));
+        col = mix(col, (kind > 1.5 ? vec3(0.8, 0.88, 1.0) : warm) * dot0 * dot0 * 0.5, vSmall);
+        gl_FragColor = vec4(col * vLit * uAlpha * (0.45 + 0.55 * fract(vSeed * 7.31)), 1.0);
       }`,
   });
   const p = new THREE.Points(g, m);
@@ -1448,9 +1453,9 @@ function frame() {
     bgGal.visible = gA > 0.002;
     galaxyGrp.scale.setScalar(Math.max(bangE, 0.001));
     const gu = galaxy.material.uniforms;
-    gu.uTime.value = t; gu.uForm.value = 1; gu.uIgnite.value = 1; gu.uAlpha.value = gA;
+    gu.uTime.value = t; gu.uForm.value = 1; gu.uIgnite.value = 1; gu.uAlpha.value = gA * lerp(0.55, 1, sstep(ZOOM0 - 0.06, ZOOM0 + 0.12, a)); // 遠看時不要比其他星系亮太多
     galaxy.visible = gA > 0.002;
-    galGlow.material.uniforms.uAlpha.value = bangE * sstep(150, 560, camSun) * skyOut * 0.85;
+    galGlow.material.uniforms.uAlpha.value = bangE * sstep(150, 560, camSun) * skyOut * lerp(0.3, 0.85, sstep(ZOOM0 - 0.06, ZOOM0 + 0.12, a));
     galGlow.visible = galGlow.material.uniforms.uAlpha.value > 0.002;
     const nearA = sstep(ZOOM0, ZOOM0 + 0.1, a) * sstep(1000, 430, camSun) * skyOut;
     localStars.material.uniforms.uAlpha.value = nearA; localStars.material.uniforms.uTime.value = t;
