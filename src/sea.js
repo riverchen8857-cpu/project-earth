@@ -1,4 +1,4 @@
-// 第三幕第一輪：潛進奧陶紀的海裡，看當時的生態，然後結冰。
+// 第三幕第一輪：穿過大氣、雲層，落到海面，潛進奧陶紀的海裡，看當時的生態，然後結冰。
 // 生物都是用程式拼出來的簡單實體模型（直角石、三葉蟲、海百合、無頜魚），大小比例不是真實的。
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -8,7 +8,8 @@ const sstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t 
 const lerp = (a, b, t) => a + (b - a) * t;
 const PI = Math.PI;
 
-export const SEA_IN = 0.225, SEA_OUT = 0.775; // 這一輪的進度：入水、出水
+export const SKY_IN = 0.22, SEA_IN = 0.36, SEA_OUT = 0.8; // 這一輪的進度：進大氣層、入水、出水
+const SKY_C = new THREE.Vector3(0, -9000, 0);  // 海面上空的場景
 const SEA_C = new THREE.Vector3(0, -5000, 0);  // 海底場景放在離主場景很遠的地方
 const FLOOR_Y = -6;
 const floorH = (x, z) => Math.sin(x * 0.11) * Math.cos(z * 0.09) * 1.3 + Math.sin(x * 0.31 + 1.7) * Math.sin(z * 0.27) * 0.4;
@@ -229,23 +230,141 @@ export function createSea(scene, isMobile, PX) {
     return { im, list: Array.from({ length: n }, () => ({ ox: (Math.random() - 0.5) * 3, oy: (Math.random() - 0.5) * 1.2, oz: (Math.random() - 0.5) * 2.4, ph: Math.random() * 9 })) };
   })();
 
+  /* ====================== 海面上空：大氣 → 雲層 → 海面 ====================== */
+  const sky = new THREE.Group();
+  sky.visible = false;
+  scene.add(sky);
+  const SUN = new THREE.Vector3(0.35, 0.5, -0.8).normalize();
+  const SU = { uTime: U.uTime, uAlt: { value: 1 }, uHorizon: { value: new THREE.Color() }, uSun: { value: SUN } };
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(6500, 48, 32), new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false,
+    uniforms: SU,
+    vertexShader: `varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `
+      uniform vec3 uHorizon, uSun; uniform float uAlt; varying vec3 vD;
+      void main(){
+        vec3 d = normalize(vD);
+        vec3 zen = mix(vec3(0.1, 0.3, 0.62), vec3(0.004, 0.012, 0.05), uAlt); // 越高，頭頂越接近太空的黑
+        vec3 col = mix(uHorizon, zen, pow(smoothstep(0.0, 0.85, d.y), 0.55));
+        float s = max(dot(d, uSun), 0.0);
+        col += vec3(1.0, 0.95, 0.85) * (pow(s, 900.0) * 3.0 + pow(s, 24.0) * 0.28);
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+  }));
+  dome.renderOrder = -10; dome.frustumCulled = false;
+  sky.add(dome);
+  const ocean = new THREE.Mesh(new THREE.PlaneGeometry(13000, 13000), new THREE.ShaderMaterial({
+    uniforms: SU,
+    vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+    fragmentShader: `
+      uniform vec3 uHorizon, uSun; uniform float uTime; varying vec3 vW;
+      ${NOISE}
+      float h(vec2 q){ return fbm(vec3(q * 0.045, uTime * 0.3)) + fbm(vec3(q * 0.2 + 7.0, uTime * 0.55)) * 0.3; }
+      void main(){
+        vec3 V = normalize(cameraPosition - vW); float d = distance(cameraPosition, vW);
+        float e = 0.6 + d * 0.006; vec2 q = vW.xz;
+        float h0 = h(q), hx = h(q + vec2(e, 0.0)), hz = h(q + vec2(0.0, e));
+        vec3 n = normalize(vec3(-(hx - h0) / e * 2.2, 1.0, -(hz - h0) / e * 2.2));
+        n = normalize(mix(n, vec3(0.0, 1.0, 0.0), smoothstep(150.0, 2600.0, d) * 0.85));
+        float fr = pow(1.0 - max(dot(n, V), 0.0), 4.0);
+        vec3 col = mix(vec3(0.006, 0.06, 0.15), uHorizon, 0.06 + 0.85 * fr);
+        col += vec3(1.0, 0.95, 0.85) * pow(max(dot(reflect(-V, n), uSun), 0.0), 160.0) * 1.6;
+        col += vec3(0.9) * smoothstep(0.78, 0.9, h0) * smoothstep(900.0, 40.0, d) * 0.25; // 近看才有的浪花
+        col = mix(col, uHorizon, 1.0 - exp(-d * 0.00042));
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+  }));
+  ocean.rotation.x = -PI / 2; ocean.frustumCulled = false;
+  sky.add(ocean);
+  const cloudMat = (scale, cover, alpha) => new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    uniforms: { ...SU, uScale: { value: scale }, uCover: { value: cover }, uA: { value: alpha } },
+    vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+    fragmentShader: `
+      uniform vec3 uHorizon; uniform float uTime, uScale, uCover, uA; varying vec3 vW;
+      ${NOISE}
+      void main(){
+        vec2 q = vW.xz * uScale + uTime * 0.004;
+        float n = fbm(vec3(q, 1.0)) + fbm(vec3(q * 3.7, 5.0)) * 0.28;
+        float a = smoothstep(uCover, uCover + 0.2, n);
+        float lum = 0.52 + 0.3 * smoothstep(uCover, uCover + 0.35, n) - 0.14 * fbm(vec3(q * 9.0, 2.0));
+        float d = distance(cameraPosition, vW);
+        vec3 col = mix(vec3(lum), uHorizon, 1.0 - exp(-d * 0.00035));
+        gl_FragColor = vec4(col, a * uA * exp(-d * 0.00012));
+      }`,
+  });
+  const CLOUD_Y = 330;
+  const clouds = [[CLOUD_Y, 0.0016, 0.5, 0.96], [CLOUD_Y + 26, 0.0022, 0.56, 0.7], [130, 0.004, 0.66, 0.6]].map(([y, sc, cv, al], i) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(13000, 13000), cloudMat(sc, cv, al));
+    m.rotation.x = -PI / 2; m.userData.y = y; m.renderOrder = 2 + i; m.frustumCulled = false;
+    sky.add(m);
+    return m;
+  });
+  const horHigh = new THREE.Color(0.2, 0.4, 0.72), horLow = new THREE.Color(0.46, 0.64, 0.8);
+
+  /* ---------- 入水時的氣泡 ---------- */
+  const bubbles = (() => {
+    const n = 260, pos = new Float32Array(n * 3), seed = new Float32Array(n);
+    for (let i = 0; i < n; i++) { pos.set([(Math.random() - 0.5) * 7, Math.random() * 9, (Math.random() - 0.5) * 6], i * 3); seed[i] = Math.random(); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+    const pts = new THREE.Points(g, new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      uniforms: { uTime: U.uTime, uAlpha: { value: 0 }, uPx: { value: PX } },
+      vertexShader: `attribute float aSeed; uniform float uTime, uPx;
+        void main(){ vec3 p = position; p.y = mod(p.y + uTime * (2.0 + aSeed * 3.0), 9.0) - 4.5; p.x += sin(uTime * 3.0 + aSeed * 40.0) * 0.12;
+          vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_Position = projectionMatrix * mv; gl_PointSize = clamp(uPx * (2.0 + aSeed * 5.0) * (7.0 / -mv.z), 1.5 * uPx, 22.0 * uPx); }`,
+      fragmentShader: `uniform float uAlpha; void main(){ float d = length(gl_PointCoord - 0.5) * 2.0; float ring = smoothstep(1.0, 0.8, d) * (0.25 + 0.75 * smoothstep(0.55, 0.9, d)); gl_FragColor = vec4(vec3(0.75, 0.95, 1.0) * ring * uAlpha, 1.0); }`,
+    }));
+    pts.frustumCulled = false; pts.renderOrder = 6;
+    grp.add(pts);
+    return pts;
+  })();
+
   let seaT = 0, lastT = 0;
   const fogWarm = new THREE.Color(0.006, 0.085, 0.14), fogCold = new THREE.Color(0.02, 0.045, 0.075);
 
-  // v：這一輪的進度。開著的時候會接管鏡頭
-  function update(on, camera, lookAt, v, t) {
-    grp.visible = on;
-    if (!on) { lastT = t; return; }
+  // v：這一輪的進度。回傳 on（有沒有接管鏡頭）、white（穿過雲層或入水時的白霧）
+  const out = { on: false, white: 0 };
+  function update(v, t, camera, lookAt) {
+    const inSky = v > SKY_IN && v <= SEA_IN, inSea = v > SEA_IN && v < SEA_OUT;
+    sky.visible = inSky; grp.visible = inSea;
+    out.on = inSky || inSea; out.white = 0;
+    U.uTime.value = t;
+    if (inSky) { // 從高空一路往下：越低天越藍、海面的細節越清楚，中途穿過雲層
+      const s = (v - SKY_IN) / (SEA_IN - SKY_IN);
+      const alt = 5 + 1700 * Math.pow(1 - s, 2.4) - sstep(0.93, 1, s) * 6;
+      const cx = SKY_C.x, cy = SKY_C.y + alt, cz = SKY_C.z - s * 1100;
+      camera.position.set(cx, cy, cz);
+      const down = lerp(1.9, 0.16, sstep(0.0, 0.8, s)) + sstep(0.9, 1, s) * 0.9; // 一開始往下看，接近海面時抬平，最後一頭栽進水裡
+      lookAt.set(cx, cy - down, cz - 1);
+      camera.lookAt(lookAt);
+      SU.uAlt.value = clamp01(alt / 1500);
+      SU.uHorizon.value.copy(horLow).lerp(horHigh, SU.uAlt.value);
+      dome.position.copy(camera.position);
+      ocean.position.set(cx, SKY_C.y, cz);
+      for (const c of clouds) c.position.set(cx, SKY_C.y + c.userData.y, cz);
+      out.white = Math.exp(-Math.pow((alt - CLOUD_Y - 13) / 55, 2)) * 0.92 + sstep(0.975, 1, s) * 0.8;
+      lastT = t;
+      return out;
+    }
+    if (!inSea) { lastT = t; return out; }
     const k = clamp01((v - SEA_IN) / (SEA_OUT - SEA_IN));
-    const frozen = sstep(0.58, 0.72, v);
+    const frozen = sstep(0.62, 0.74, v);
     seaT += Math.min(0.1, Math.max(0, t - lastT)) * (1 - frozen); lastT = t; // 結冰之後一切慢慢停下來
-    U.uTime.value = t; U.uSeaT.value = seaT; U.uFrozen.value = frozen;
+    U.uSeaT.value = seaT; U.uFrozen.value = frozen;
     U.uLight.value = lerp(0.58, 0.3, frozen);
     U.uFog.value.copy(fogWarm).lerp(fogCold, frozen);
 
-    camera.position.set(SEA_C.x + lerp(-1.6, 1.6, k), SEA_C.y - 2.7 + Math.sin(t * 0.4) * 0.07, SEA_C.z + lerp(10.5, 7.4, k));
-    lookAt.set(SEA_C.x + lerp(-3, 2, k), SEA_C.y - 3.3, SEA_C.z);
+    const sink = 1 - sstep(0.0, 0.16, k); // 剛入水：從海面往下沉到海床附近
+    camera.position.set(SEA_C.x + lerp(-1.6, 1.6, k), SEA_C.y - 2.7 + sink * sink * 9 + Math.sin(t * 0.4) * 0.07, SEA_C.z + lerp(10.5, 7.4, k));
+    lookAt.set(SEA_C.x + lerp(-3, 2, k), SEA_C.y - 3.3 + sink * 2.5, SEA_C.z);
     camera.lookAt(lookAt);
+    out.white = (1 - sstep(0.0, 0.03, k)) * 0.8;
+    bubbles.material.uniforms.uAlpha.value = (1 - sstep(0.02, 0.14, k)) * 0.8;
+    bubbles.visible = bubbles.material.uniforms.uAlpha.value > 0.003;
+    bubbles.position.copy(camera.position).sub(SEA_C).add(P.set(0, 0, -3.5));
 
     for (const tr of trilos.list) {
       const wob = Math.sin(seaT * 0.5 + tr.ph) * 0.5;
@@ -271,6 +390,7 @@ export function createSea(scene, isMobile, PX) {
         Q.setFromEuler(E.set(drop * 1.2 * (f.ox > 0 ? 1 : -1), -a - PI / 2 + Math.sin(seaT * 5 + f.ph) * 0.12, 0)), S.set(1, 1, 1)));
     });
     fish.im.instanceMatrix.needsUpdate = true;
+    return out;
   }
   return { update };
 }

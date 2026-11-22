@@ -5,7 +5,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { feature } from 'topojson-client';
 import landTopo from 'world-atlas/land-110m.json';
-import { createSea, SEA_IN, SEA_OUT } from './sea.js';
+import { createSea, SKY_IN, SEA_OUT } from './sea.js';
 
 /* ---------- 工具 ---------- */
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
@@ -26,7 +26,7 @@ const isMobile = Math.min(innerWidth, innerHeight) < 768;
 
 /* ---------- 八幕時間軸 ---------- */
 // 0 創世（大爆炸到地球）、1 拉遠、2 五次銷毀、3 祈禱、4 壓制、5 其他實驗場、6 回到那道光、7 你
-const WEIGHTS = [1.5, 0.9, 3.54, 1.2, 1.9, 0.9, 0.9, 1.0];
+const WEIGHTS = [1.5, 0.9, 3.9, 1.2, 1.9, 0.9, 0.9, 1.0];
 const NA = WEIGHTS.length;
 const B = [0];
 { const sum = WEIGHTS.reduce((s, w) => s + w, 0); let acc = 0; for (const w of WEIGHTS) { acc += w / sum; B.push(acc); } B[NA] = 1; }
@@ -173,7 +173,7 @@ const planet = (() => {
       uTime: { value: 0 }, uReveal: { value: 0 }, uCold: { value: 0 },
       uSeed: { value: 0 }, uLife: { value: 1 }, uWipe: { value: 0 }, uType: { value: 0 },
       uSpark: { value: 0 }, uFlood: { value: 0 }, uPlague: { value: 0 }, uWar: { value: 0 },
-      uImpact: { value: IMPACT.clone() }, uMap: { value: landMap }, uReal: { value: 0 }, uEra: { value: 4 }, uFade: { value: 1 },
+      uSeedF: { value: 1 }, uImpact: { value: IMPACT.clone() }, uMap: { value: landMap }, uReal: { value: 0 }, uEra: { value: 4 }, uFade: { value: 1 },
     },
     vertexShader: `
       varying vec3 vN; varying vec3 vP; varying vec3 vV; varying vec2 vUv;
@@ -185,7 +185,7 @@ const planet = (() => {
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: `
-      uniform float uTime, uReveal, uCold, uSeed, uLife, uWipe, uType, uSpark, uFlood, uPlague, uWar;
+      uniform float uTime, uReveal, uCold, uSeed, uLife, uWipe, uType, uSpark, uFlood, uPlague, uWar, uSeedF;
       uniform vec3 uImpact; uniform sampler2D uMap; uniform float uReal, uEra, uFade;
       varying vec3 vN; varying vec3 vP; varying vec3 vV; varying vec2 vUv;
       ${NOISE}
@@ -215,6 +215,8 @@ const planet = (() => {
         vec3 rock = mix(vec3(0.20, 0.17, 0.15), vec3(0.34, 0.29, 0.24), detail);
         vec3 deadSea = mix(vec3(0.02, 0.05, 0.10), vec3(0.06, 0.13, 0.20), smoothstep(0.30, 0.52, h));
         float lifeMask = smoothstep(1.0 - uLife * 1.35, 1.0 - uLife * 1.35 + 0.35, detail * 0.6 + vnoise(p * 9.0 + so) * 0.4);
+        float seedAng = acos(clamp(p.y, -1.0, 1.0)), seedFront = uSeedF * 3.7;
+        lifeMask *= smoothstep(seedFront, seedFront - 0.4, seedAng);
         vec3 col = mix(mix(deadSea, ocean, lifeMask), mix(rock, ground, lifeMask), land);
         float ice = smoothstep(0.80, 0.92, abs(p.y) + (detail - 0.5) * 0.12);
         col = mix(col, vec3(0.90, 0.95, 1.0), ice);
@@ -226,6 +228,7 @@ const planet = (() => {
         float c = fbm(p * 3.0 + vec3(uTime * 0.012, 0.0, uTime * 0.008) + so);
         float cloud = smoothstep(0.52, 0.72, c) * mix(0.35, 1.0, uLife);
         vec3 emit = vec3(0.0);
+        emit += vec3(0.55, 1.2, 0.95) * (exp(-pow((seedAng - seedFront) / 0.08, 2.0)) + 0.35 * exp(-pow((seedAng - seedFront * 0.8) / 0.2, 2.0))) * step(0.001, uSeedF) * (1.0 - smoothstep(0.82, 1.0, uSeedF)) * 1.8; // 投放的波往外擴散
 
         // ---- 銷毀：五種方式 ----
         float w = uWipe;
@@ -1274,13 +1277,13 @@ const flame = (() => {
   return p;
 })();
 
-/* ---------- 第三幕第一輪的海底場景 ---------- */
+/* ---------- 第三幕第一輪的天空與海底場景 ---------- */
 const sea = createSea(scene, isMobile, PX);
 
 /* ---------- DOM ---------- */
 const q = (sel) => [...document.querySelectorAll(sel)];
 const el = {
-  flash: $('flash'), dark: $('dark'), frame: $('frame'), watch: $('watch'), wTag: $('w-tag'), hint: $('hint'),
+  haze: $('haze'), flash: $('flash'), dark: $('dark'), frame: $('frame'), watch: $('watch'), wTag: $('w-tag'), hint: $('hint'),
   line1: $('line1'), line2: $('line2'), hudLayer: $('hud'), hud: q('#hud li'), id: $('v-id'),
   vAu: $('v-au'), vYear: $('v-year'), vTilt: $('v-tilt'), vAir: $('v-air'), vWater: $('v-water'), vG: $('v-g'),
   a3: $('a3'), round: q('#round li'), a3end: $('a3end'), humanTag: $('humanTag'),
@@ -1328,11 +1331,12 @@ const updateWatch = () => {
 };
 
 /* ---------- 第三幕：六輪的狀態 ---------- */
-const ROUND_W = [0.43, 0.165, 0.18, 0.14, 0.18, 0.17]; // 第一輪比較長：多了潛進海裡那一段
+const ROUND_W = [0.56, 0.165, 0.18, 0.14, 0.18, 0.17]; // 第一輪比較長：多了從軌道一路潛進海裡那一段
 const ROUND_B = [0]; { const sum = ROUND_W.reduce((x, w) => x + w, 0); let acc = 0; for (const w of ROUND_W) { acc += w / sum; ROUND_B.push(acc); } ROUND_B[6] = 1; }
-// 第一輪：把拉長後的進度 v 對回原本的節奏（投放 → 培養 → 銷毀 → 換下一輪），中間那一大段在海裡
-const R0_MAP = [[0, 0], [0.12, 0.2], [0.6, 0.5], [0.78, 0.56], [0.9, 0.8], [0.94, 0.86], [1, 1]];
+// 第一輪：把拉長後的進度 v 對回原本的節奏（投放 → 培養 → 銷毀 → 換下一輪），中間那一大段在天上和海裡
+const R0_MAP = [[0, 0], [0.1, 0.2], [0.64, 0.5], [0.82, 0.56], [0.92, 0.8], [0.95, 0.86], [1, 1]];
 const r0u = (v) => { for (let i = 0; i < R0_MAP.length - 1; i++) if (v < R0_MAP[i + 1][0]) return lerp(R0_MAP[i][1], R0_MAP[i + 1][1], (v - R0_MAP[i][0]) / (R0_MAP[i + 1][0] - R0_MAP[i][0])); return 1; };
+const STRIKE = 0.055; // 第一輪進度：光打到星球的那一刻
 const roundState = (p) => {
   if (p <= B[2]) return { r: 0, u: 0, life: 1, wipe: 0, type: 0, seed: 0, grow: 0, killT: 0, on: false };
   if (p >= B[3]) return { r: 5, u: 1, life: 1, wipe: 0, type: 0, seed: 5, grow: 6, killT: 5, on: false };
@@ -1345,7 +1349,7 @@ const roundState = (p) => {
   const kill = sstep(0.56, 0.8, u);
   return {
     r, u, v, on: true,
-    life: swapped ? 0 : (r === 0 ? sstep(0.09, 0.2, v) : sstep(0.05, 0.42, u)), // 第一輪：光打下來之後生命才出現
+    life: swapped ? 0 : (r === 0 ? sstep(STRIKE, STRIKE + 0.01, v) : sstep(0.05, 0.42, u)), // 第一輪：光打下來之後生命才出現
     wipe: u < 0.8 ? kill : 1 - sstep(0.9, 1.0, u),
     type: r, seed: swapped ? r + 1 : r,
     grow: r + sstep(0.08, 0.5, u), killT: r + kill,
@@ -1444,20 +1448,22 @@ function frame() {
     cRight.setFromMatrixColumn(camera.matrixWorld, 0); cUp.setFromMatrixColumn(camera.matrixWorld, 1); cFwd.setFromMatrixColumn(camera.matrixWorld, 2).negate();
   }
 
-  /* ---- 第三幕第一輪：光打下來投放 → 俯衝入海 → 海裡的生態 → 結冰 → 回到軌道 ---- */
+  /* ---- 第三幕第一輪：光打下來投放 → 俯衝穿過大氣、雲層 → 入海 → 海裡的生態 → 結冰 → 回到軌道 ---- */
   const seaV = p > B[2] && p < B[3] && rs.r === 0 ? rs.v : -1;
-  const seaOn = seaV > SEA_IN && seaV < SEA_OUT;
-  const seedPulse = seaV >= 0 ? gauss(seaV, 0.07, 0.03) : 0;
-  const seaFlash = seaV >= 0 ? (gauss(seaV, SEA_IN, 0.014) + gauss(seaV, SEA_OUT, 0.014)) * 0.95 : 0;
-  if (seaV >= 0 && !seaOn) {
-    const dive = sstep(0.13, SEA_IN, seaV) * (1 - sstep(SEA_OUT, SEA_OUT + 0.08, seaV));
-    if (dive > 0.001) { camera.position.multiplyScalar(lerp(1, (PLANET_R + 0.45) / camera.position.length(), dive * dive)); lookAt.multiplyScalar(1 - dive); camera.lookAt(lookAt); }
-  }
-  sea.update(seaOn, camera, lookAt, seaV, t);
+  const charge = seaV >= 0 && seaV < STRIKE ? sstep(0.0, STRIKE, seaV) : 0;         // 蓄能
+  const strike = seaV >= STRIKE ? Math.exp(-(seaV - STRIKE) / 0.03) : 0;             // 打下來之後慢慢消退
+  let seaOn = false, seaWhite = 0, hazeV = 0;
   if (seaV >= 0) {
+    const dive = sstep(0.14, SKY_IN, seaV) * (1 - sstep(SEA_OUT, SEA_OUT + 0.07, seaV));
+    if (dive > 0.001) { camera.position.multiplyScalar(lerp(1, (PLANET_R + 0.3) / camera.position.length(), dive * dive)); lookAt.multiplyScalar(1 - dive); camera.lookAt(lookAt); }
+    hazeV = sstep(SKY_IN - 0.035, SKY_IN, seaV) * (1 - sstep(SKY_IN, SKY_IN + 0.02, seaV)); // 進大氣層：畫面先被藍色的大氣蓋滿
+    if (strike > 0.02) { camera.position.x += Math.sin(t * 61) * strike * 0.12; camera.position.y += Math.cos(t * 53) * strike * 0.12; }
+    const so = sea.update(seaV, t, camera, lookAt);
+    seaOn = so.on; seaWhite = so.white + gauss(seaV, SEA_OUT, 0.014) * 0.95;
     camera.updateMatrixWorld();
     cRight.setFromMatrixColumn(camera.matrixWorld, 0); cUp.setFromMatrixColumn(camera.matrixWorld, 1); cFwd.setFromMatrixColumn(camera.matrixWorld, 2).negate();
-  }
+  } else sea.update(-1, t, camera, lookAt);
+  setO(el.haze, hazeV);
 
   /* ---- 第一幕：一個點 → 炸出許多星系 → 放大進銀河系 ---- */
   const skyOut = 1 - sstep(0.1, 0.55, b); // 第二幕發現是艙壁之後，天空整個淡掉
@@ -1526,7 +1532,13 @@ function frame() {
   bu.uTop.value = lerp(BEAM_TOP, 80, back);
   tmpColor.copy(WARM).lerp(COLD, cold).lerp(KILL, killing * 0.85).lerp(WARM, back);
   bu.uColor.value.copy(tmpColor);
-  if (seaOn) bu.uI.value = 0; else if (seedPulse > 0.001) { bu.uI.value *= 1 + seedPulse * 2.5; bu.uWidth.value *= 1 + seedPulse * 1.5; } // 投放：一道特別亮的光打下來
+  // 投放：光束先收細變暗、蓄能閃爍，然後一道又粗又亮的光打下來
+  if (seaOn) bu.uI.value = 0;
+  else if (seaV >= 0 && seaV < 0.2) {
+    bu.uI.value *= lerp(1, 0.25 + 0.2 * Math.sin(t * 40) * charge, charge) * (1 + strike * 7);
+    bu.uWidth.value *= lerp(1, 0.5, charge) * (1 + strike * 9);
+    bu.uColor.value.lerp(tmpColor.setRGB(1.25, 1.3, 1.35), Math.min(1, strike * 1.5));
+  }
   beam.rotation.y = Math.atan2(camera.position.x, camera.position.z);
 
   /* ---- 星空、塵埃 ---- */
@@ -1544,6 +1556,7 @@ function frame() {
   const pu = planet.material.uniforms;
   pu.uTime.value = t; pu.uReveal.value = reveal; pu.uCold.value = cold; pu.uFade.value = 1 - gone;
   planet.visible = gone < 0.999 && reveal > 0.001;
+  pu.uSeedF.value = seaV >= 0 ? (seaV < STRIKE ? 0 : sstep(STRIKE, STRIKE + 0.1, seaV)) : 1;
   pu.uSeed.value = rs.seed; pu.uLife.value = rs.life; pu.uWipe.value = rs.wipe; pu.uType.value = rs.type;
   pu.uEra.value = Math.min(rs.seed, 4); pu.uReal.value = rs.seed >= 5 ? 1 : 0;
   pu.uFlood.value = pulse(d, 0.30, 0.50, 0.06);
@@ -1552,7 +1565,7 @@ function frame() {
   pu.uSpark.value = sstep(0.42, 0.8, v3);
   planet.rotation.y = t * 0.035;
   planet.scale.setScalar(pScale); atmo.scale.setScalar(pScale);
-  atmo.material.uniforms.uReveal.value = reveal * (1 - gone);
+  atmo.material.uniforms.uReveal.value = reveal * (1 - gone) * (1 + strike * 2.5);
   atmo.material.uniforms.uHot.value = 1 - sstep(0.3, 0.9, reveal);
   atmo.material.uniforms.uKill.value = killing * (rs.type >= 2 ? 0.6 : 0.15);
 
@@ -1570,7 +1583,7 @@ function frame() {
     meteor.material.opacity = sstep(0, 0.15, k);
   } else meteor.material.opacity = 0;
   const impactFlash = (inAct3 && rs.r === 4) ? gauss(rs.u, 0.575, 0.012) * 0.75 : 0;
-  const flashV = (in1 ? gauss(a, BANG + 0.004, 0.008) * 0.9 : 0) + seaFlash + impactFlash + gauss(v1, 0.9, 0.03) * 0.3 * (stage === 0 ? 1 : 0);
+  const flashV = (in1 ? gauss(a, BANG + 0.004, 0.008) * 0.9 : 0) + seaWhite + (seaV >= 0 ? gauss(seaV, STRIKE + 0.003, 0.006) * 0.75 : 0) + impactFlash + gauss(v1, 0.9, 0.03) * 0.3 * (stage === 0 ? 1 : 0);
   setO(el.flash, flashV);
 
   /* ---- 第三幕：演化樹、化石、DNA ---- */
@@ -1597,13 +1610,13 @@ function frame() {
   const holoA = sstep(0.14, 0.5, b) * (1 - sstep(0.3, 0.6, f));
   holoMat.opacity = holoA * 0.85; holoDim.opacity = holoA * 0.35;
   holoMat.color.copy(COLD).lerp(KILL, lock); holoDim.color.copy(COLD).lerp(KILL, lock);
-  holo.scale.setScalar(lerp(0.6, 1, sstep(0.14, 0.6, b)) * lerp(1, 0.7, lock));
+  holo.scale.setScalar(lerp(0.6, 1, sstep(0.14, 0.6, b)) * lerp(1, 0.7, lock) * (1 - charge * 0.12 + strike * 0.3));
   for (const r of holoRings) r.l.rotation.y = t * r.speed;
   chamberMat.opacity = sstep(0.28, 0.85, b) * 0.5 * lerp(1, 0.55, sstep(0.3, 0.9, f)) * (1 - gone);
   const em = sstep(0.22, 0.7, b) * (1 - gone);
   emitterMat.opacity = em; emitterBody.opacity = em; emitterEdge.opacity = em * 0.8;
   emitter.grp.visible = em > 0.002; // 看不見的時候也不要擋住後面的東西
-  emitter.rings.forEach((r, i) => { r.rotation.z = t * (0.4 - i * 0.25); });
+  emitter.rings.forEach((r, i) => { r.rotation.z = t * (0.4 - i * 0.25) * (1 + charge * 6); r.scale.setScalar(1 + strike * 0.5); });
 
   /* ---- 第四幕：祈禱 ---- */
   prayers.material.uniforms.uTime.value = t;
@@ -1642,6 +1655,7 @@ function frame() {
 
   bloom.strength = lerp(lerp(0.75, 0.6, cold) * lerp(1, 0.55, sstep(0.0, 0.15, c)), 0.75, back) + flashV * 1.0 + killing * 0.08;
   bloom.threshold = lerp(lerp(0.32, 0.5, sstep(0.0, 0.15, c)), 0.32, back);
+  bloom.strength += strike * 1.2;
   if (seaOn) { bloom.strength = 0.3; bloom.threshold = 0.7; }
 
   /* ================= 文字 ================= */
