@@ -32,11 +32,15 @@ export function createSea(scene, isMobile, PX) {
   grp.visible = false;
   scene.add(grp);
 
-  // 生物、海床共用的材質：上方來的光、水面的光紋、越遠越融進水色
+  // 生物、海床共用的材質：上方來的光、濕潤的反光、水面的光紋、越遠越融進水色。
+  // mode 決定表面的花紋：0 斑駁、1 直角石的殼、2 軟體的皮膚、3 甲殼、4 海百合、5 魚
   const seaMat = (c1, c2 = c1, o = {}) => new THREE.ShaderMaterial({
-    uniforms: { ...U, uColor: { value: new THREE.Color(...c1) }, uColor2: { value: new THREE.Color(...c2) }, uSway: { value: o.sway || 0 }, uStripe: { value: o.stripe || 0 }, uMottle: { value: o.mottle || 0 } },
+    side: THREE.DoubleSide,
+    uniforms: { ...U, uColor: { value: new THREE.Color(...c1) }, uColor2: { value: new THREE.Color(...c2) }, uSway: { value: o.sway || 0 }, uMode: { value: o.mode || 0 }, uSpec: { value: o.spec || 0 },
+      uWaveY: { value: o.waveY || 0 }, uWaveZ: { value: o.waveZ || 0 }, uWaveSpd: { value: o.waveSpd || 2.2 } },
     vertexShader: `
-      uniform float uSeaT, uSway, uFrozen; varying vec3 vW, vN, vL;
+      attribute vec2 aAnim; // x：離根部多遠（0～1），y：相位
+      uniform float uSeaT, uSway, uFrozen, uWaveY, uWaveZ, uWaveSpd; varying vec3 vW, vN, vL;
       void main(){
         vec3 p = position;
         mat4 m = modelMatrix;
@@ -48,21 +52,54 @@ export function createSea(scene, isMobile, PX) {
         p.x += (sin(uSeaT * 0.9 + ph + p.y * 0.6) * 0.03 + uFrozen * 0.035) * bend;
         p.z += cos(uSeaT * 0.7 + ph) * 0.018 * bend;
         p.y -= uFrozen * 0.012 * bend * p.y;
+        float t2 = aAnim.x * aAnim.x, live = 1.0 - uFrozen * 0.85; // 觸手、腕、尾巴的擺動：越末端擺越大
+        p.y += sin(uSeaT * uWaveSpd - aAnim.x * 5.5 + aAnim.y + ph) * uWaveY * t2 * live - uFrozen * uWaveY * t2 * 1.6;
+        p.z += cos(uSeaT * uWaveSpd * 0.83 - aAnim.x * 4.6 + aAnim.y * 1.7 + ph) * uWaveZ * t2 * live;
         vec4 w = m * vec4(p, 1.0);
         vW = w.xyz; vL = position; vN = normalize(mat3(m) * normal);
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: `
-      uniform vec3 uColor, uColor2, uFog; uniform float uLight, uFrozen, uTime, uStripe, uMottle; varying vec3 vW, vN, vL;
+      uniform vec3 uColor, uColor2, uFog; uniform float uLight, uFrozen, uTime, uMode, uSpec; varying vec3 vW, vN, vL;
       ${NOISE}
       void main(){
-        vec3 n = normalize(vN), v = normalize(cameraPosition - vW);
-        float diff = 0.3 + 0.7 * max(dot(n, normalize(vec3(0.25, 1.0, 0.35))), 0.0);
-        float k = uStripe > 0.0 ? smoothstep(-0.2, 0.2, sin(vL.x * uStripe)) : 0.0;
-        k = mix(k, smoothstep(0.35, 0.65, fbm(vW * 0.7)), uMottle);
-        vec3 col = mix(uColor, uColor2, k);
+        vec3 v = normalize(cameraPosition - vW), n = normalize(vN);
+        if (dot(n, v) < 0.0) n = -n;
+        vec3 Ld = normalize(vec3(0.25, 1.0, 0.35));
+        vec3 col; float shade = 1.0;
+        if (uMode < 0.5) { // 斑駁
+          col = mix(uColor, uColor2, smoothstep(0.35, 0.65, fbm(vW * 0.7)));
+        } else if (uMode < 1.5) { // 直角石的殼：寬窄不一的色帶、細密的生長紋、風化的斑
+          float gx = vL.x * 2.6 + (fbm(vL * 2.2) - 0.5) * 0.9;
+          float band = 0.5 * vnoise(vec3(gx * 1.9, 3.0, 1.0)) + 0.32 * vnoise(vec3(gx * 6.1, 9.0, 2.0)) + 0.18 * vnoise(vec3(gx * 17.0, 4.0, 6.0));
+          band = smoothstep(0.34, 0.66, band + (fbm(vL * 7.0) - 0.5) * 0.25);
+          col = mix(uColor, uColor2, band);
+          col = mix(col, uColor2 * 0.45, smoothstep(0.6, 0.82, fbm(vL * 5.0 + 3.0)) * 0.55);
+          col = mix(col, vec3(0.9, 0.88, 0.8), smoothstep(0.68, 0.85, fbm(vL * 9.0)) * 0.3);
+          float ridge = sin(vL.x * 120.0);
+          shade = 0.93 + 0.07 * ridge;
+          col *= mix(1.0, 0.55, smoothstep(-0.1, 0.0, vL.x)); // 殼口的暗邊
+        } else if (uMode < 2.5) { // 軟體：紅褐色的斑駁、淺色的斑點、腹面較淡
+          col = mix(uColor, uColor2, smoothstep(0.3, 0.7, fbm(vL * 6.0)));
+          col = mix(col, vec3(0.95, 0.82, 0.72), smoothstep(0.7, 0.8, vnoise(vL * 26.0)) * 0.6);
+          col = mix(col, vec3(0.92, 0.78, 0.7), smoothstep(0.1, -0.7, vN.y) * 0.45);
+        } else if (uMode < 3.5) { // 甲殼
+          col = mix(uColor, uColor2, smoothstep(0.3, 0.7, fbm(vL * 9.0)));
+          col *= 0.8 + 0.4 * vnoise(vL * 40.0);
+        } else if (uMode < 4.5) { // 海百合：莖是一節一節的，往上到腕的顏色比較鮮豔
+          float up = smoothstep(3.4, 4.6, vL.y);
+          col = mix(uColor2, uColor, up);
+          col *= mix(0.78 + 0.22 * step(0.5, fract(vL.y * 7.0)), 1.0, up);
+          col *= 0.85 + 0.3 * fbm(vL * 8.0);
+        } else { // 魚：背深腹淺、細鱗
+          col = mix(uColor2, uColor, smoothstep(-0.4, 0.6, vN.y));
+          col *= 0.9 + 0.1 * sin(vL.x * 150.0) * sin(vL.y * 190.0 + vL.z * 130.0);
+          col *= 0.85 + 0.3 * fbm(vL * 14.0);
+        }
+        float diff = 0.26 + 0.74 * max(dot(n, Ld), 0.0);
         float ca = pow(vnoise(vec3(vW.xz * 0.9, uTime * 0.6)), 3.0) * max(n.y, 0.0) * 1.1 * (1.0 - uFrozen);
-        col *= diff * (1.0 + ca) * uLight;
+        col *= diff * shade * (1.0 + ca) * uLight;
+        col += vec3(0.9, 1.0, 0.95) * pow(max(dot(reflect(-Ld, n), v), 0.0), 26.0) * uSpec * uLight * 0.6;
         col = mix(col, vec3(0.72, 0.84, 0.94) * diff * uLight, uFrozen * 0.5);
         col += uFog * pow(1.0 - max(dot(n, v), 0.0), 2.5) * 0.7;
         col = mix(col, uFog, 1.0 - exp(-distance(vW, cameraPosition) * 0.062));
@@ -100,7 +137,7 @@ export function createSea(scene, isMobile, PX) {
     const pos = g.attributes.position;
     for (let i = 0; i < pos.count; i++) pos.setY(i, FLOOR_Y + floorH(pos.getX(i), pos.getZ(i)) + (Math.random() - 0.5) * 0.06);
     g.computeVertexNormals();
-    grp.add(new THREE.Mesh(g, seaMat([0.34, 0.32, 0.25], [0.19, 0.2, 0.18], { mottle: 1 })));
+    grp.add(new THREE.Mesh(g, seaMat([0.34, 0.32, 0.25], [0.19, 0.2, 0.18])));
   }
 
   /* ---------- 從海面灑下來的光柱 ---------- */
@@ -149,19 +186,58 @@ export function createSea(scene, isMobile, PX) {
 
   const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), S = new THREE.Vector3(), P = new THREE.Vector3();
   const place = (g, x, y, z, sx = 1, sy = sx, sz = sx, rx = 0, ry = 0, rz = 0) => g.applyMatrix4(M.compose(P.set(x, y, z), Q.setFromEuler(E.set(rx, ry, rz)), S.set(sx, sy, sz)));
-  const tube = (pts, r, seg = 12) => new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(...p))), seg, r, 5);
-
-  /* ---------- 海百合：一整片長在海床上 ---------- */
-  {
-    const H = 3.8, parts = [tube([[0, 0, 0], [0.15, 1.2, 0], [0.05, 2.6, 0.1], [0.2, H, 0]], 0.05, 16)];
-    parts.push(place(new THREE.SphereGeometry(0.17, 10, 8), 0.2, H + 0.08, 0, 1, 1.4, 1));
-    for (let k = 0; k < 12; k++) {
-      const a = (k / 12) * PI * 2, c = Math.cos(a), s = Math.sin(a), w = 0.85 + (k % 3) * 0.12;
-      parts.push(tube([[0.2, H + 0.1, 0], [0.2 + c * 0.38 * w, H + 0.5, s * 0.38 * w], [0.2 + c * 0.66 * w, H + 1.05, s * 0.66 * w], [0.2 + c * 0.52 * w, H + 1.55, s * 0.52 * w]], 0.024, 8));
+  // 會變細的管子（觸手、腕、莖）。每個頂點帶著「離根部多遠」和相位，給材質做擺動
+  const taperTube = (pts, r0, r1, seg = 14, rad = 6, ph = 0, t0 = 0, t1 = 1) => {
+    const curve = new THREE.CatmullRomCurve3(pts.map((q) => new THREE.Vector3(...q)));
+    const fr = curve.computeFrenetFrames(seg, false);
+    const pos = [], nor = [], uv = [], anim = [], idx = [];
+    for (let a = 0; a <= seg; a++) {
+      const u = a / seg, c = curve.getPointAt(u), r = lerp(r0, r1, u), N = fr.normals[a], Bn = fr.binormals[a];
+      for (let b = 0; b <= rad; b++) {
+        const an = (b / rad) * PI * 2, cs = Math.cos(an), sn = Math.sin(an);
+        const nx = cs * N.x + sn * Bn.x, ny = cs * N.y + sn * Bn.y, nz = cs * N.z + sn * Bn.z;
+        pos.push(c.x + r * nx, c.y + r * ny, c.z + r * nz); nor.push(nx, ny, nz); uv.push(u, b / rad); anim.push(lerp(t0, t1, u), ph);
+      }
     }
-    const geo = mergeGeometries(parts);
-    for (const [col, n] of [[[0.86, 0.5, 0.34], 34], [[0.8, 0.72, 0.42], 28], [[0.62, 0.36, 0.5], 18]]) {
-      const im = new THREE.InstancedMesh(geo, seaMat(col, col, { sway: 1 }), isMobile ? Math.ceil(n / 2) : n);
+    for (let a = 0; a < seg; a++) for (let b = 0; b < rad; b++) { const k = a * (rad + 1) + b, l = k + rad + 1; idx.push(k, l, k + 1, l, l + 1, k + 1); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setAttribute('aAnim', new THREE.Float32BufferAttribute(anim, 2));
+    g.setIndex(idx);
+    return g;
+  };
+  const merge = (parts) => { // 沒有擺動資料的零件補上 0
+    for (const g of parts) if (!g.attributes.aAnim) g.setAttribute('aAnim', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    return mergeGeometries(parts);
+  };
+  const one = (g) => merge([g]);
+
+  /* ---------- 海百合：節狀的莖、杯狀的萼、一圈帶羽枝的腕 ---------- */
+  {
+    const H = 3.8, TOP = [0.2, H + 0.12, 0];
+    const parts = [taperTube([[0, 0, 0], [0.15, 1.2, 0], [0.05, 2.6, 0.1], [0.2, H, 0]], 0.06, 0.045, 22, 6, 0, 0, 0)];
+    for (let k = 0; k < 5; k++) { const a = (k / 5) * PI * 2 + 0.3; parts.push(taperTube([[0, 0.12, 0], [Math.cos(a) * 0.22, 0.03, Math.sin(a) * 0.22], [Math.cos(a) * 0.42, -0.04, Math.sin(a) * 0.42]], 0.04, 0.012, 4, 5, 0, 0, 0)); } // 固著的根
+    parts.push(place(new THREE.SphereGeometry(0.19, 12, 10), TOP[0], H + 0.1, 0, 1, 1.35, 1)); // 萼
+    const NA = 14, tmp = new THREE.Vector3(), tan = new THREE.Vector3(), side = new THREE.Vector3();
+    for (let k = 0; k < NA; k++) {
+      const a = (k / NA) * PI * 2, c = Math.cos(a), sn = Math.sin(a), w = 0.85 + (k % 3) * 0.14, ph = k * 1.3;
+      const pts = [TOP, [TOP[0] + c * 0.3 * w, H + 0.5, sn * 0.3 * w], [TOP[0] + c * 0.66 * w, H + 1.05, sn * 0.66 * w], [TOP[0] + c * 0.8 * w, H + 1.7, sn * 0.8 * w], [TOP[0] + c * 0.6 * w, H + 2.25, sn * 0.6 * w]];
+      parts.push(taperTube(pts, 0.03, 0.008, 12, 5, ph, 0, 0.5));
+      const curve = new THREE.CatmullRomCurve3(pts.map((q) => new THREE.Vector3(...q)));
+      for (let q = 2; q <= 13; q++) { // 羽枝：沿著腕往兩側長的細毛
+        const u = q / 14; curve.getPointAt(u, tmp); curve.getTangentAt(u, tan);
+        side.set(-sn, 0, c);
+        for (const sg of [-1, 1]) {
+          const L = 0.24 * (1 - u * 0.45);
+          parts.push(taperTube([[tmp.x, tmp.y, tmp.z], [tmp.x + (side.x * sg * 0.7 + tan.x * 0.5) * L, tmp.y + tan.y * 0.5 * L + 0.02, tmp.z + (side.z * sg * 0.7 + tan.z * 0.5) * L]], 0.009, 0.002, 1, 3, ph, u * 0.5, u * 0.5));
+        }
+      }
+    }
+    const geo = merge(parts);
+    for (const [top, stalk, n] of [[[0.95, 0.5, 0.26], [0.5, 0.36, 0.26], 34], [[0.9, 0.78, 0.36], [0.46, 0.4, 0.28], 28], [[0.7, 0.34, 0.56], [0.4, 0.3, 0.32], 18]]) {
+      const im = new THREE.InstancedMesh(geo, seaMat(top, stalk, { sway: 1, mode: 4, waveY: 0.5, waveZ: 0.35, waveSpd: 1.1 }), isMobile ? Math.ceil(n / 2) : n);
       for (let i = 0; i < im.count; i++) {
         const x = (Math.random() - 0.5) * 58, z = -34 + Math.random() * 40, sc = 0.65 + Math.random() * 0.85;
         im.setMatrixAt(i, M.compose(P.set(x, FLOOR_Y + floorH(x, z) - 0.05, z), Q.setFromEuler(E.set(0, Math.random() * PI * 2, 0)), S.set(sc, sc, sc)));
@@ -171,24 +247,50 @@ export function createSea(scene, isMobile, PX) {
     }
   }
 
+  /* ---------- 海床上的腕足類與石塊 ---------- */
+  {
+    const shell = merge([place(new THREE.SphereGeometry(1, 14, 8, 0, PI * 2, 0, PI / 2), 0, 0, 0, 0.16, 0.07, 0.13)]);
+    const n = isMobile ? 70 : 170;
+    const im = new THREE.InstancedMesh(shell, seaMat([0.72, 0.66, 0.52], [0.46, 0.4, 0.32], { mode: 3, spec: 0.3 }), n);
+    for (let i = 0; i < n; i++) {
+      const x = (Math.random() - 0.5) * 30, z = -14 + Math.random() * 24, sc = 0.6 + Math.random() * 1.2;
+      im.setMatrixAt(i, M.compose(P.set(x, FLOOR_Y + floorH(x, z) + 0.0, z), Q.setFromEuler(E.set((Math.random() - 0.5) * 0.4, Math.random() * PI * 2, (Math.random() - 0.5) * 0.4)), S.set(sc, sc, sc)));
+    }
+    im.frustumCulled = false; grp.add(im);
+    const rock = new THREE.SphereGeometry(1, 18, 12), rp = rock.attributes.position;
+    for (let i = 0; i < rp.count; i++) { const k = 1 + Math.sin(rp.getX(i) * 3.1) * 0.14 + Math.cos(rp.getY(i) * 4.3 + rp.getZ(i) * 2.2) * 0.14; rp.setXYZ(i, rp.getX(i) * k, rp.getY(i) * k * 0.6, rp.getZ(i) * k); }
+    rock.computeVertexNormals();
+    const rm = new THREE.InstancedMesh(one(rock), seaMat([0.3, 0.3, 0.27], [0.16, 0.18, 0.17]), 26);
+    for (let i = 0; i < 26; i++) {
+      const x = (Math.random() - 0.5) * 50, z = -30 + Math.random() * 38, sc = 0.3 + Math.random() * 1.1;
+      rm.setMatrixAt(i, M.compose(P.set(x, FLOOR_Y + floorH(x, z) - 0.1, z), Q.setFromEuler(E.set(0, Math.random() * PI * 2, 0)), S.set(sc, sc, sc)));
+    }
+    rm.frustumCulled = false; grp.add(rm);
+  }
+
   /* ---------- 三葉蟲：在海床上爬 ---------- */
   const trilos = (() => {
     const parts = [];
-    parts.push(place(new THREE.SphereGeometry(0.3, 18, 10, 0, PI * 2, 0, PI / 2), 0, 0, 0.34, 1.08, 0.5, 0.78)); // 頭甲
-    parts.push(place(new THREE.SphereGeometry(0.13, 12, 10), 0, 0.1, 0.36, 1, 0.85, 1.35));                     // 頭鞍
+    parts.push(place(new THREE.SphereGeometry(0.3, 22, 12, 0, PI * 2, 0, PI / 2), 0, 0, 0.34, 1.08, 0.5, 0.78)); // 頭甲
+    parts.push(place(new THREE.SphereGeometry(0.13, 14, 10), 0, 0.1, 0.36, 1, 0.85, 1.35));                     // 頭鞍
+    for (let k = 0; k < 3; k++) parts.push(place(new THREE.TorusGeometry(0.105, 0.012, 5, 14, PI), 0, 0.13, 0.3 + k * 0.07, 1, 0.75, 1, -PI / 2.6, 0, 0)); // 頭鞍溝
     for (const sx of [-1, 1]) {
-      parts.push(place(new THREE.SphereGeometry(0.05, 8, 8), sx * 0.17, 0.12, 0.36));                            // 眼
-      parts.push(place(new THREE.ConeGeometry(0.045, 0.42, 6), sx * 0.31, 0.02, 0.12, 1, 1, 1, -PI / 2, 0, sx * 0.12)); // 頰刺
-      parts.push(place(new THREE.CylinderGeometry(0.008, 0.008, 0.5, 4), sx * 0.1, 0.05, 0.78, 1, 1, 1, PI / 2, 0, -sx * 0.35)); // 觸角
+      parts.push(place(new THREE.SphereGeometry(0.055, 10, 8), sx * 0.17, 0.115, 0.35, 0.8, 1, 1.5));            // 新月形的複眼
+      parts.push(place(new THREE.ConeGeometry(0.045, 0.5, 6), sx * 0.32, 0.02, 0.08, 1, 1, 1, -PI / 2, 0, sx * 0.1)); // 頰刺
+      parts.push(taperTube([[sx * 0.08, 0.04, 0.6], [sx * 0.16, 0.06, 0.85], [sx * 0.3, 0.04, 1.1]], 0.009, 0.003, 5, 4, sx, 0, 1)); // 觸角
     }
-    for (let i = 0; i < 10; i++) { // 胸節：中軸一節、左右肋葉各一節
-      const z = 0.2 - i * 0.076, w = 0.3 * (1 - 0.035 * i);
-      parts.push(place(new THREE.SphereGeometry(1, 10, 8), 0, 0.06, z, w * 0.4, 0.13, 0.05));
-      for (const sx of [-1, 1]) parts.push(place(new THREE.SphereGeometry(1, 10, 8), sx * w * 0.66, 0.03, z - 0.012, w * 0.46, 0.065, 0.048, 0, sx * 0.18, 0));
+    for (let i = 0; i < 11; i++) { // 胸節：中軸一節、左右肋葉各一節、末端一根刺
+      const z = 0.21 - i * 0.07, w = 0.3 * (1 - 0.034 * i);
+      parts.push(place(new THREE.SphereGeometry(1, 10, 8), 0, 0.065, z, w * 0.4, 0.13, 0.044));
+      for (const sx of [-1, 1]) {
+        parts.push(place(new THREE.SphereGeometry(1, 10, 8), sx * w * 0.66, 0.03, z - 0.012, w * 0.46, 0.062, 0.042, 0, sx * 0.18, 0));
+        parts.push(place(new THREE.ConeGeometry(0.018, 0.13, 4), sx * (w * 1.1 + 0.02), 0.01, z - 0.045, 1, 1, 1, -PI / 2, 0, sx * 0.9));
+      }
     }
-    parts.push(place(new THREE.SphereGeometry(0.2, 14, 10, 0, PI * 2, 0, PI / 2), 0, 0, -0.63, 1, 0.42, 0.95)); // 尾甲
+    parts.push(place(new THREE.SphereGeometry(0.2, 16, 10, 0, PI * 2, 0, PI / 2), 0, 0, -0.63, 1, 0.42, 0.95)); // 尾甲
+    for (let k = 0; k < 4; k++) parts.push(place(new THREE.TorusGeometry(0.06 + k * 0.035, 0.008, 4, 12, PI), 0, 0.03 + (3 - k) * 0.012, -0.6, 1, 1, 1, PI / 2.4, 0, PI));
     const n = isMobile ? 7 : 13;
-    const im = new THREE.InstancedMesh(mergeGeometries(parts), seaMat([0.5, 0.36, 0.24], [0.36, 0.26, 0.18], { mottle: 1 }), n);
+    const im = new THREE.InstancedMesh(merge(parts), seaMat([0.42, 0.29, 0.18], [0.24, 0.17, 0.12], { mode: 3, spec: 0.7, waveY: 0.06, waveZ: 0.05, waveSpd: 3 }), n);
     im.frustumCulled = false;
     grp.add(im);
     const list = Array.from({ length: n }, (_, i) => ({ x: -9 + Math.random() * 18, z: -5 + Math.random() * 11, a: Math.random() * PI * 2, sp: 0.12 + Math.random() * 0.14, sc: 0.9 + Math.random() * 0.7, ph: Math.random() * 9, i }));
@@ -199,17 +301,21 @@ export function createSea(scene, isMobile, PX) {
   /* ---------- 直角石：直筒殼的頭足類，當時的頂級掠食者 ---------- */
   const mkOrtho = () => {
     const g = new THREE.Group();
-    const shell = new THREE.ConeGeometry(0.44, 5.2, 24, 12);
-    shell.rotateZ(PI / 2); shell.translate(-2.6, 0, 0); // 尖端朝後
-    g.add(new THREE.Mesh(shell, seaMat([0.8, 0.72, 0.58], [0.6, 0.4, 0.28], { stripe: 15 })));
-    const soft = [place(new THREE.SphereGeometry(0.42, 16, 12), 0.25, 0, 0, 1.15, 0.9, 0.9)];
-    for (let k = 0; k < 9; k++) {
-      const a = (k / 9) * PI * 2, c = Math.cos(a), s = Math.sin(a);
-      soft.push(tube([[0.55, c * 0.14, s * 0.14], [1.0, c * 0.3, s * 0.3], [1.5, c * 0.34, s * 0.34], [1.95, c * 0.2, s * 0.2]], 0.05, 10));
+    const shell = new THREE.ConeGeometry(0.46, 5.2, 40, 48, true);
+    shell.rotateZ(PI / 2); shell.translate(-2.6, 0, 0); // 尖端朝後，殼口在 x = 0
+    g.add(new THREE.Mesh(one(shell), seaMat([0.86, 0.8, 0.66], [0.5, 0.3, 0.17], { mode: 1, spec: 0.5 })));
+    const soft = [
+      place(new THREE.SphereGeometry(0.43, 20, 14), 0.22, -0.03, 0, 1.25, 0.88, 0.9),   // 頭
+      place(new THREE.SphereGeometry(0.47, 20, 12), 0.06, 0.17, 0, 1.0, 0.58, 0.97),    // 頭巾
+      taperTube([[0.2, -0.3, 0], [0.5, -0.42, 0], [0.78, -0.4, 0]], 0.1, 0.06, 5, 8, 0, 0, 0),    // 漏斗
+    ];
+    for (let k = 0; k < 10; k++) { // 十條觸手：從口的周圍往前伸，末端往內捲
+      const a = (k / 10) * PI * 2 + 0.3, c = Math.cos(a), s = Math.sin(a), L = 1.0 + (k % 3) * 0.14;
+      soft.push(taperTube([[0.6, c * 0.14, s * 0.14], [0.6 + 0.55 * L, c * 0.3, s * 0.3], [0.6 + 1.15 * L, c * 0.4, s * 0.4], [0.6 + 1.7 * L, c * 0.3, s * 0.3], [0.6 + 2.0 * L, c * 0.14 - 0.06, s * 0.14]], 0.085, 0.012, 22, 7, k * 1.7, 0.05, 1));
     }
-    g.add(new THREE.Mesh(mergeGeometries(soft), seaMat([0.8, 0.48, 0.36], [0.62, 0.32, 0.26], { mottle: 1 })));
-    const eyes = mergeGeometries([place(new THREE.SphereGeometry(0.085, 10, 8), 0.34, 0.1, 0.36), place(new THREE.SphereGeometry(0.085, 10, 8), 0.34, 0.1, -0.36)]);
-    g.add(new THREE.Mesh(eyes, seaMat([0.04, 0.04, 0.05])));
+    g.add(new THREE.Mesh(merge(soft), seaMat([0.74, 0.4, 0.3], [0.48, 0.22, 0.17], { mode: 2, spec: 0.9, waveY: 0.3, waveZ: 0.26, waveSpd: 1.8 })));
+    g.add(new THREE.Mesh(merge([-1, 1].map((sz) => place(new THREE.SphereGeometry(0.115, 14, 10), 0.4, 0.07, sz * 0.33))), seaMat([0.82, 0.68, 0.3], [0.6, 0.45, 0.2], { mode: 3, spec: 1.5 }))); // 眼
+    g.add(new THREE.Mesh(merge([-1, 1].map((sz) => place(new THREE.SphereGeometry(0.07, 12, 8), 0.41, 0.07, sz * 0.385, 1, 1, 0.6))), seaMat([0.02, 0.02, 0.025], [0.02, 0.02, 0.025], { spec: 2.5 }))); // 瞳孔
     g.traverse((o) => { o.frustumCulled = false; });
     grp.add(g);
     return g;
@@ -220,11 +326,18 @@ export function createSea(scene, isMobile, PX) {
     { g: mkOrtho(), x0: -22, x1: 10, y: -2.4, z: -16, sc: 0.75, dir: 1 },
   ];
 
-  /* ---------- 無頜魚：很小的一群 ---------- */
+  /* ---------- 無頜魚：頭部有骨甲、沒有下巴，很小的一群 ---------- */
   const fish = (() => {
-    const parts = [place(new THREE.SphereGeometry(1, 12, 8), 0, 0, 0, 0.3, 0.11, 0.1), place(new THREE.ConeGeometry(0.09, 0.3, 6), -0.4, 0, 0, 1, 1, 0.3, 0, 0, -PI / 2)];
+    const parts = [
+      place(new THREE.SphereGeometry(1, 16, 10), -0.05, 0, 0, 0.34, 0.12, 0.1),           // 身體
+      place(new THREE.SphereGeometry(1, 14, 10), 0.14, 0, 0, 0.2, 0.135, 0.125),           // 頭甲
+      place(new THREE.SphereGeometry(1, 10, 8), -0.46, 0, 0, 0.13, 0.15, 0.012),           // 尾鰭
+    ];
+    for (const sz of [-1, 1]) parts.push(place(new THREE.SphereGeometry(0.02, 6, 6), 0.3, 0.02, sz * 0.06));
+    const geo = merge(parts), gp = geo.attributes.position, an = geo.attributes.aAnim;
+    for (let i = 0; i < gp.count; i++) an.setX(i, clamp01((0.12 - gp.getX(i)) / 0.6)); // 越靠尾巴擺越大
     const n = isMobile ? 8 : 16;
-    const im = new THREE.InstancedMesh(mergeGeometries(parts), seaMat([0.5, 0.6, 0.62], [0.3, 0.36, 0.4], { mottle: 1 }), n);
+    const im = new THREE.InstancedMesh(geo, seaMat([0.3, 0.36, 0.38], [0.66, 0.7, 0.66], { mode: 5, spec: 0.8, waveZ: 0.16, waveSpd: 9 }), n);
     im.frustumCulled = false;
     grp.add(im);
     return { im, list: Array.from({ length: n }, () => ({ ox: (Math.random() - 0.5) * 3, oy: (Math.random() - 0.5) * 1.2, oz: (Math.random() - 0.5) * 2.4, ph: Math.random() * 9 })) };
