@@ -15,6 +15,7 @@ const gauss = (x, c, w) => Math.exp(-Math.pow((x - c) / w, 2));
 const $ = (id) => document.getElementById(id);
 const setO = (node, v) => { node.style.opacity = v < 0.002 ? '0' : v.toFixed(3); };
 const setT = (node, s) => { if (node.textContent !== s) node.textContent = s; };
+const setH = (node, s) => { if (node.__h !== s) { node.__h = s; node.innerHTML = s; } };
 let seedN = 20261122;
 const rand = () => { seedN = (seedN * 1664525 + 1013904223) >>> 0; return seedN / 4294967296; };
 
@@ -24,8 +25,8 @@ const forcedP = params.has('p') ? parseFloat(params.get('p')) : null; // 除錯�
 const isMobile = Math.min(innerWidth, innerHeight) < 768;
 
 /* ---------- 八幕時間軸 ---------- */
-// 0 創世、1 拉遠、2 五次銷毀、3 祈禱、4 壓制、5 其他實驗場、6 回到那道光、7 你
-const WEIGHTS = [1.0, 0.9, 2.8, 1.2, 1.9, 0.9, 0.9, 1.0];
+// 0 創世（大爆炸到地球）、1 拉遠、2 五次銷毀、3 祈禱、4 壓制、5 其他實驗場、6 回到那道光、7 你
+const WEIGHTS = [3.4, 0.9, 2.8, 1.2, 1.9, 0.9, 0.9, 1.0];
 const NA = WEIGHTS.length;
 const B = [0];
 { const sum = WEIGHTS.reduce((s, w) => s + w, 0); let acc = 0; for (const w of WEIGHTS) { acc += w / sum; B.push(acc); } B[NA] = 1; }
@@ -44,7 +45,7 @@ const PX = renderer.getPixelRatio();
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 const FOV = 45, TAN = Math.tan((FOV / 2) * Math.PI / 180);
-const camera = new THREE.PerspectiveCamera(FOV, innerWidth / innerHeight, 0.05, 3000);
+const camera = new THREE.PerspectiveCamera(FOV, innerWidth / innerHeight, 0.05, 14000);
 camera.position.set(0, 0, 9);
 
 const composer = new EffectComposer(renderer);
@@ -94,75 +95,6 @@ const stars = (() => {
   return p;
 })();
 
-/* ---------- 塵埃 → 星雲 ---------- */
-const dust = (() => {
-  const n = isMobile ? 26000 : 80000;
-  const start = new Float32Array(n * 3), target = new Float32Array(n * 3);
-  const seed = new Float32Array(n), size = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const u = Math.random() * 2 - 1, th = Math.random() * Math.PI * 2, r = 6 + Math.pow(Math.random(), 0.6) * 34;
-    const s = Math.sqrt(1 - u * u);
-    start.set([r * s * Math.cos(th), r * u * 0.7, r * s * Math.sin(th)], i * 3);
-    const rr = 2.3 + Math.pow(Math.random(), 1.6) * 8.5;
-    const arm = Math.floor(Math.random() * 3) * (Math.PI * 2 / 3);
-    const ang = arm + rr * 0.55 + (Math.random() - 0.5) * 1.1;
-    const thick = (Math.random() - 0.5) * (0.25 + rr * 0.06);
-    target.set([rr * Math.cos(ang), thick, rr * Math.sin(ang)], i * 3);
-    seed[i] = Math.random();
-    size[i] = 0.5 + Math.pow(Math.random(), 3) * 2.4;
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(start, 3));
-  g.setAttribute('aTarget', new THREE.BufferAttribute(target, 3));
-  g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
-  g.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
-  const m = new THREE.ShaderMaterial({
-    ...ADD,
-    uniforms: { uTime: { value: 0 }, uForm: { value: 0 }, uAlpha: { value: 0 }, uCold: { value: 0 }, uPx: { value: PX }, uBang: { value: 1 }, uHot: { value: 0 } },
-    vertexShader: `
-      attribute vec3 aTarget; attribute float aSeed; attribute float aSize;
-      uniform float uTime, uForm, uPx, uBang, uHot;
-      varying float vR; varying float vSeed; varying float vDens;
-      mat2 rot(float a){ float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
-      void main(){
-        float f = clamp(uForm * 1.45 - aSeed * 0.45, 0.0, 1.0);
-        f = f * f * (3.0 - 2.0 * f);
-        // 大爆炸：所有粒子從同一個點噴出去，快的先到
-        float bg = clamp(uBang * (0.65 + aSeed * 0.8), 0.0, 1.0);
-        bg = 1.0 - pow(1.0 - bg, 4.0);
-        vec3 p = mix(position * bg, aTarget, f);
-        float r = length(aTarget.xz);
-        float ang = (1.0 - f) * (2.5 + aSeed * 4.0) + uTime * 0.06 * (1.6 - r / 11.0);
-        p.xz = rot(ang) * p.xz;
-        p.y += sin(uTime * 0.4 + aSeed * 40.0) * 0.05 * (1.0 - f * 0.5);
-        vR = r; vSeed = aSeed;
-        vec4 mv = modelViewMatrix * vec4(p, 1.0);
-        gl_Position = projectionMatrix * mv;
-        vDens = smoothstep(0.0, 0.3, bg);
-        gl_PointSize = clamp(aSize * uPx * (70.0 / -mv.z), 1.1 * uPx, 9.0 * uPx) * (1.0 + uHot * 0.8);
-      }`,
-    fragmentShader: `
-      uniform float uAlpha, uCold, uHot; varying float vR; varying float vSeed; varying float vDens;
-      void main(){
-        float d = length(gl_PointCoord - 0.5);
-        float a = smoothstep(0.5, 0.0, d);
-        vec3 warm = mix(vec3(1.0, 0.86, 0.6), vec3(1.0, 0.55, 0.3), smoothstep(2.0, 9.0, vR));
-        vec3 blue = mix(vec3(0.75, 0.86, 1.0), vec3(0.35, 0.5, 1.0), smoothstep(2.0, 9.0, vR));
-        vec3 col = mix(warm, blue, step(0.62, vSeed));
-        col = mix(col, vec3(0.35, 0.85, 1.0) * 0.8, uCold);
-        col = mix(col, mix(vec3(1.3, 1.25, 1.2), vec3(0.75, 0.9, 1.4), vSeed), uHot);
-        gl_FragColor = vec4(col, a * a * uAlpha * 0.5 * vDens);
-      }`,
-  });
-  const p = new THREE.Points(g, m);
-  p.frustumCulled = false;
-  p.rotation.x = 0.32;
-  p.position.set(0, 6, -150);
-  p.scale.setScalar(3.4);
-  scene.add(p);
-  return p;
-})();
-
 /* ---------- 那道光 ---------- */
 const BEAM_TOP = 10.5;
 const beam = (() => {
@@ -193,103 +125,6 @@ const beam = (() => {
   mesh.frustumCulled = false;
   scene.add(mesh);
   return mesh;
-})();
-
-/* ---------- 大爆炸：奇異點的光與往外推的衝擊波 ---------- */
-const bang = (() => {
-  const m = new THREE.ShaderMaterial({
-    ...ADD, depthTest: false,
-    uniforms: { uGlow: { value: 0 }, uTight: { value: 1000 }, uRing: { value: 0 }, uRingA: { value: 0 } },
-    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-    fragmentShader: `
-      uniform float uGlow, uTight, uRing, uRingA; varying vec2 vUv;
-      void main(){
-        vec2 q = (vUv - 0.5) * 2.0;
-        float r = length(q);
-        float core = exp(-r * r * uTight) * uGlow;
-        // 十字星芒，讓那個點看起來是一顆極亮的光源
-        float spike = (exp(-abs(q.y) * 900.0) * exp(-abs(q.x) * 14.0) + exp(-abs(q.x) * 900.0) * exp(-abs(q.y) * 14.0)) * uGlow * 0.5;
-        float ring = exp(-pow((r - uRing) / 0.010, 2.0)) + exp(-pow((r - uRing * 0.62) / 0.02, 2.0)) * 0.45 + exp(-pow((r - uRing * 0.3) / 0.05, 2.0)) * 0.2;
-        ring *= uRingA * smoothstep(1.0, 0.8, r);
-        vec3 col = vec3(1.0, 0.98, 0.95) * (core + spike) + mix(vec3(0.7, 0.85, 1.3), vec3(1.2, 0.8, 0.5), smoothstep(0.0, 0.8, uRing)) * ring;
-        float a = core + spike + ring;
-        gl_FragColor = vec4(col, a);
-      }`,
-  });
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), m);
-  mesh.scale.setScalar(230);
-  mesh.renderOrder = 6; mesh.frustumCulled = false;
-  scene.add(mesh);
-  return mesh;
-})();
-
-/* ---------- 大爆炸炸出來的其他星球 ---------- */
-const BANG_C = new THREE.Vector3(0, 6, -150); // 爆炸的那一點
-const worlds = (() => {
-  const defs = [
-    // 停下來的位置、半徑、兩個顏色、條紋感（氣態行星高）、有沒有環
-    { p: [-40, 12, -74], r: 6.5, a: [0.85, 0.66, 0.42], b: [0.55, 0.36, 0.2], band: 1, ring: true },
-    { p: [31, -9, -52], r: 3.0, a: [0.72, 0.3, 0.16], b: [0.4, 0.14, 0.08], band: 0 },
-    { p: [-15, -9, -30], r: 1.7, a: [0.55, 0.54, 0.52], b: [0.3, 0.3, 0.3], band: 0 },
-    { p: [24, 15, -98], r: 8.0, a: [0.5, 0.72, 0.85], b: [0.25, 0.42, 0.62], band: 1 },
-    { p: [-64, -6, -112], r: 5.0, a: [0.9, 0.62, 0.3], b: [0.6, 0.3, 0.12], band: 1 },
-    { p: [9.5, 5.5, -21], r: 1.0, a: [0.62, 0.6, 0.56], b: [0.36, 0.35, 0.33], band: 0 },
-    { p: [58, 3, -132], r: 7.0, a: [0.6, 0.5, 0.78], b: [0.3, 0.24, 0.5], band: 1, ring: true },
-    { p: [-22, 24, -142], r: 4.0, a: [0.3, 0.62, 0.55], b: [0.14, 0.34, 0.3], band: 0 },
-    { p: [-7, -4.5, -15], r: 0.6, a: [0.8, 0.5, 0.3], b: [0.45, 0.24, 0.14], band: 0 },
-  ];
-  const list = [];
-  for (const d of defs) {
-    const m = new THREE.ShaderMaterial({
-      transparent: true,
-      uniforms: { uA: { value: new THREE.Color(...d.a) }, uB: { value: new THREE.Color(...d.b) }, uBand: { value: d.band }, uAlpha: { value: 0 }, uHot: { value: 1 }, uSeed: { value: rand() * 50 } },
-      vertexShader: `varying vec3 vN; varying vec3 vP; varying vec3 vV; void main(){ vP = position; vN = normalize(mat3(modelMatrix) * normal); vec4 w = modelMatrix * vec4(position, 1.0); vV = normalize(cameraPosition - w.xyz); gl_Position = projectionMatrix * viewMatrix * w; }`,
-      fragmentShader: `
-        uniform vec3 uA, uB; uniform float uBand, uAlpha, uHot, uSeed; varying vec3 vN; varying vec3 vP; varying vec3 vV;
-        float hash(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-        float vnoise(vec3 x){ vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
-          return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
-                     mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z); }
-        float fbm(vec3 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++){ s += a * vnoise(p); p = p * 2.03 + 11.7; a *= 0.5; } return s; }
-        void main(){
-          vec3 p = normalize(vP);
-          float n = fbm(p * 2.4 + uSeed);
-          float bands = 0.5 + 0.5 * sin(p.y * 14.0 + n * 5.0 + uSeed);
-          float k = mix(smoothstep(0.35, 0.65, n), bands, uBand);
-          vec3 col = mix(uB, uA, k);
-          vec3 L = normalize(vec3(0.55, 0.75, 0.6));
-          float diff = max(dot(vN, L), 0.0);
-          vec3 lit = col * (0.035 + diff * 1.05);
-          lit += col * pow(1.0 - max(dot(vN, vV), 0.0), 3.0) * 0.35 * (0.3 + diff);
-          // 剛炸出來的時候是熔融發亮的
-          float lava = fbm(p * 4.0 + uSeed * 2.0);
-          vec3 molten = mix(vec3(0.9, 0.25, 0.04), vec3(1.35, 0.85, 0.3), smoothstep(0.4, 0.7, lava));
-          lit = mix(lit, molten, uHot);
-          gl_FragColor = vec4(lit, uAlpha);
-        }`,
-    });
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(d.r, 64, 48), m);
-    mesh.rotation.z = (rand() - 0.5) * 0.8;
-    mesh.frustumCulled = false; mesh.visible = false;
-    scene.add(mesh);
-    let ringMat = null;
-    if (d.ring) {
-      ringMat = new THREE.ShaderMaterial({
-        transparent: true, side: THREE.DoubleSide, depthWrite: false,
-        uniforms: { uAlpha: { value: 0 }, uC: { value: new THREE.Color(...d.a) } },
-        vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-        fragmentShader: `uniform float uAlpha; uniform vec3 uC; varying vec2 vUv;
-          void main(){ float r = length(vUv - 0.5) * 2.0; if (r < 0.56 || r > 1.0) discard; float t = (r - 0.56) / 0.44;
-            float bandsR = 0.55 + 0.45 * sin(t * 46.0) * sin(t * 13.0 + 1.0); float gap = smoothstep(0.02, 0.05, abs(t - 0.58));
-            gl_FragColor = vec4(uC * (0.5 + 0.5 * bandsR), bandsR * gap * 0.75 * uAlpha * smoothstep(0.0, 0.06, t) * smoothstep(1.0, 0.92, t)); }`,
-      });
-      const ring = new THREE.Mesh(new THREE.PlaneGeometry(d.r * 4.6, d.r * 4.6), ringMat);
-      ring.rotation.x = -PI / 2 + 0.35;
-      mesh.add(ring);
-    }
-    list.push({ mesh, m, ringMat, rest: new THREE.Vector3(...d.p), speed: 0.75 + rand() * 0.5 });
-  }
-  return list;
 })();
 
 /* ---------- 星球 ---------- */
@@ -475,6 +310,684 @@ const atmo = (() => {
   scene.add(mesh);
   return mesh;
 })();
+
+/* ====================== 第一幕：從大爆炸到地球 ====================== */
+// 世界座標：地球在原點。太陽放在星球著色用的光源方向上，原行星盤通過地球；
+// 銀河系的一條旋臂通過這裡，銀心在遠處。各層的尺度不是等比例的。
+const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+const gr = () => { let u = 0; for (let i = 0; i < 4; i++) u += Math.random(); return (u - 2) * 1.732; }; // 近似常態分布
+const BANG = 0.025; // 第一幕進度：暴脹發生的那一刻
+const SUN_DIR = V3(0.55, 0.75, 0.6).normalize();
+const SUN_POS = SUN_DIR.clone().multiplyScalar(40);
+const DISK_N = V3(0, 1, 0).addScaledVector(SUN_DIR, -SUN_DIR.y).normalize();
+const DISK_E1 = SUN_DIR.clone().negate(); // 太陽指向地球
+const DISK_E2 = new THREE.Vector3().crossVectors(DISK_E1, DISK_N).normalize();
+const RG = 360, R0 = RG * 0.5;
+const GAL_N = V3(0.18, 0.95, 0.25).normalize();
+const GAL_X = (() => { const v = V3(0.6, 0, 0.8); return v.addScaledVector(GAL_N, -v.dot(GAL_N)).normalize(); })(); // 銀心指向地球
+const GAL_Z = new THREE.Vector3().crossVectors(GAL_X, GAL_N).normalize();
+const GAL_C = GAL_X.clone().multiplyScalar(-R0);
+const GAL_RB = RG * 0.2, GAL_KP = 0.24, GAL_PHI = -Math.log(R0 / GAL_RB) / GAL_KP; // 旋臂：對數螺線，其中一條剛好通過地球
+// 鏡頭方向：看整個星系時、抵達太陽星雲時
+const DIR5 = GAL_N.clone().multiplyScalar(0.8).addScaledVector(GAL_X.clone().multiplyScalar(0.3).addScaledVector(GAL_Z, 0.95).normalize(), 0.6).normalize();
+const DIR7 = DISK_N.clone().multiplyScalar(0.68).addScaledVector(DISK_E1.clone().multiplyScalar(0.5).addScaledVector(DISK_E2, -0.87).normalize(), 0.73).normalize();
+const N4 = `
+  float hash(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+  float vnoise(vec3 x){
+    vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+               mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+  }
+  float fbm(vec3 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 4; i++){ s += a * vnoise(p); p = p * 2.03 + 11.7; a *= 0.5; } return s; }
+`;
+const ROT2 = `mat2 rot(float a){ float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }`;
+
+/* ---------- 一～三：暴脹、夸克湯、復合（全畫面） ---------- */
+const cosmos = (() => {
+  const m = new THREE.ShaderMaterial({
+    ...ADD, depthTest: false,
+    uniforms: { uTime: { value: 0 }, uAspect: { value: 1 }, uHeat: { value: 0 }, uTemp: { value: 1 }, uZoom: { value: 2 }, uFog: { value: 1 }, uRays: { value: 0 }, uSparks: { value: 0 } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+    fragmentShader: `
+      uniform float uTime, uAspect, uHeat, uTemp, uZoom, uFog, uRays, uSparks; varying vec2 vUv;
+      ${N4}
+      vec3 ramp(float t){
+        vec3 c0 = vec3(0.10, 0.008, 0.0), c1 = vec3(0.62, 0.11, 0.015), c2 = vec3(0.9, 0.5, 0.13), c3 = vec3(1.05, 1.0, 0.95);
+        t = clamp(t, 0.0, 1.0);
+        return t < 0.33 ? mix(c0, c1, t / 0.33) : t < 0.66 ? mix(c1, c2, (t - 0.33) / 0.33) : mix(c2, c3, (t - 0.66) / 0.34);
+      }
+      void main(){
+        vec2 q = (vUv - 0.5) * vec2(uAspect, 1.0);
+        float r = length(q);
+        vec3 pos = vec3(q * uZoom, uTime * 0.22);
+        vec2 w = vec2(fbm(pos + 3.1), fbm(pos + 17.7)) - 0.47;
+        float n = fbm(pos + vec3(w * 2.2, 0.0));
+        float n2 = fbm(pos * 2.6 + vec3(-w * 1.5, uTime * 0.15));
+        float k = (n - 0.47) * 1.5 + (n2 - 0.47) * 0.9;
+        vec3 col = ramp(uTemp + k * 0.75 * uFog);
+        // 亂竄的粒子
+        float sp = 0.0;
+        for (int L = 0; L < 2; L++){
+          vec2 g = q * (8.0 + float(L) * 6.0) + float(L) * 3.3;
+          vec2 id = floor(g), f = fract(g) - 0.5;
+          float h = hash(vec3(id, float(L) * 7.0 + 1.0));
+          vec2 o = 0.36 * vec2(sin(uTime * (3.0 + h * 6.0) + h * 40.0), cos(uTime * (2.5 + h * 7.0) + h * 20.0));
+          sp += smoothstep(0.07, 0.0, length(f - o)) * step(0.35, h);
+        }
+        col += vec3(1.0, 0.85, 0.6) * sp * uSparks * 0.8;
+        // 第一道光：光子第一次能直線前進
+        float ang = atan(q.y, q.x);
+        float ray = pow(vnoise(vec3(cos(ang) * 46.0, sin(ang) * 46.0, r * 1.6 - uTime * 2.2)), 9.0) * smoothstep(0.08, 0.6, r);
+        col += vec3(1.0, 0.8, 0.55) * ray * uRays * 0.8;
+        gl_FragColor = vec4(col * uHeat, 1.0);
+      }`,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), m);
+  mesh.frustumCulled = false; mesh.renderOrder = 20; mesh.visible = false;
+  scene.add(mesh);
+  return mesh;
+})();
+
+/* ---------- 四：黑暗時期的氣體絲（宇宙網） ---------- */
+const webNodes = (() => {
+  const nodes = [];
+  for (let i = 0; i < 90; i++) {
+    const u = Math.random() * 2 - 1, th = Math.random() * PI * 2, r = 1500 + Math.pow(Math.random(), 0.6) * 3900, s = Math.sqrt(1 - u * u);
+    const v = V3(s * Math.cos(th), u, s * Math.sin(th));
+    if (v.dot(DIR5) > 0.72) { i--; continue; } // 不要擋在鏡頭的路線上
+    nodes.push(v.multiplyScalar(r).add(GAL_C));
+  }
+  const edges = [];
+  nodes.forEach((a, i) => {
+    const near = nodes.map((b, j) => [a.distanceToSquared(b), j]).filter((e) => e[1] !== i).sort((x, y) => x[0] - y[0]);
+    edges.push([i, near[0][1]], [i, near[1][1]]);
+  });
+  nodes.forEach((a, i) => { if (i % 6 === 0) edges.push([i, -1]); }); // 幾條接到我們這個星系
+  return { nodes, edges };
+})();
+const web = (() => {
+  const n = isMobile ? 18000 : 55000;
+  const pos = new Float32Array(n * 3), seed = new Float32Array(n);
+  const A = V3(), Bv = V3();
+  for (let i = 0; i < n; i++) {
+    if (Math.random() < 0.25) { A.copy(webNodes.nodes[Math.floor(Math.random() * 90)]); A.x += gr() * 170; A.y += gr() * 170; A.z += gr() * 170; }
+    else {
+      const e = webNodes.edges[Math.floor(Math.random() * webNodes.edges.length)];
+      A.copy(webNodes.nodes[e[0]]); Bv.copy(e[1] < 0 ? GAL_C : webNodes.nodes[e[1]]);
+      A.lerp(Bv, Math.random()); const sg = 40 + Math.random() * 90;
+      A.x += gr() * sg; A.y += gr() * sg; A.z += gr() * sg;
+    }
+    pos.set([A.x, A.y, A.z], i * 3); seed[i] = Math.random();
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+  const m = new THREE.ShaderMaterial({
+    ...ADD,
+    uniforms: { uAlpha: { value: 0 }, uPx: { value: PX } },
+    vertexShader: `attribute float aSeed; uniform float uPx; varying float vS;
+      void main(){ vS = aSeed; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv; gl_PointSize = clamp((1.0 + aSeed * 2.0) * uPx * (2600.0 / -mv.z), 1.4 * uPx, 4.0 * uPx); }`,
+    fragmentShader: `uniform float uAlpha; varying float vS;
+      void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d);
+        gl_FragColor = vec4(mix(vec3(0.26, 0.3, 0.78), vec3(0.55, 0.36, 0.8), vS), a * uAlpha); }`,
+  });
+  const p = new THREE.Points(g, m);
+  p.frustumCulled = false; p.renderOrder = -4; p.visible = false;
+  scene.add(p);
+  return p;
+})();
+
+/* ---------- 四、五：遠處的第一代恆星，之後各自長成星系 ---------- */
+const bgGal = (() => {
+  const pts = [];
+  for (const nd of webNodes.nodes) pts.push(nd.clone());
+  for (let i = 0; i < 330; i++) {
+    const e = webNodes.edges[Math.floor(Math.random() * webNodes.edges.length)];
+    const p = webNodes.nodes[e[0]].clone().lerp(e[1] < 0 ? GAL_C : webNodes.nodes[e[1]], 0.08 + Math.random() * 0.84);
+    if (p.distanceTo(GAL_C) < 1300 || p.clone().sub(GAL_C).normalize().dot(DIR5) > 0.72) continue;
+    pts.push(p.add(V3(gr() * 70, gr() * 70, gr() * 70)));
+  }
+  for (let i = 0; i < 260; i++) {
+    const u = Math.random() * 2 - 1, th = Math.random() * PI * 2, r = 4200 + Math.random() * 2600, s = Math.sqrt(1 - u * u);
+    pts.push(V3(r * s * Math.cos(th), r * u, r * s * Math.sin(th)).add(GAL_C));
+  }
+  const n = pts.length, pos = new Float32Array(n * 3), seed = new Float32Array(n), size = new Float32Array(n), shape = new Float32Array(n * 2);
+  pts.forEach((p, i) => { pos.set([p.x, p.y, p.z], i * 3); seed[i] = Math.random(); size[i] = 60 + Math.pow(Math.random(), 2) * 190; shape.set([Math.random() * PI * 2, 0.28 + Math.random() * 0.72], i * 2); });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+  g.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
+  g.setAttribute('aShape', new THREE.BufferAttribute(shape, 2));
+  const m = new THREE.ShaderMaterial({
+    ...ADD,
+    uniforms: { uAlpha: { value: 0 }, uIgnite: { value: 0 }, uGrow: { value: 0 }, uH: { value: 1 }, uPx: { value: PX }, uTime: { value: 0 } },
+    vertexShader: `attribute float aSeed, aSize; attribute vec2 aShape; uniform float uIgnite, uGrow, uH, uPx, uTime;
+      varying float vLit, vGrow, vSeed; varying vec2 vShape;
+      void main(){
+        vSeed = aSeed; vShape = aShape;
+        vLit = smoothstep(aSeed * 0.92, aSeed * 0.92 + 0.05, uIgnite);
+        vGrow = smoothstep(aSeed * 0.5, aSeed * 0.5 + 0.5, uGrow);
+        vLit *= 1.0 + (1.0 - vGrow) * 0.35 * sin(uTime * (1.5 + aSeed * 3.0) + aSeed * 60.0);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;
+        gl_PointSize = clamp(aSize * uH / -mv.z, 4.0 * uPx, 90.0 * uPx);
+      }`,
+    fragmentShader: `uniform float uAlpha; varying float vLit, vGrow, vSeed; varying vec2 vShape;
+      ${ROT2}
+      void main(){
+        vec2 q = rot(vShape.x) * ((gl_PointCoord - 0.5) * 2.0); q.y /= vShape.y;
+        float r = length(q);
+        float core = exp(-r * r * mix(90.0, 26.0, vGrow));
+        float th = atan(q.y, q.x);
+        float arms = 0.5 + 0.5 * cos(2.0 * th + 6.5 * log(r + 0.06));
+        float spiral = step(0.35, vSeed);
+        float disk = exp(-r * 3.4) * mix(1.0, 0.25 + 0.95 * arms, spiral) * smoothstep(1.0, 0.6, r) * vGrow;
+        vec3 warm = vec3(1.0, 0.84, 0.6), blue = vec3(0.6, 0.76, 1.0);
+        vec3 col = warm * core * 0.8 + mix(warm, blue, spiral * smoothstep(0.1, 0.5, r)) * disk * 0.7;
+        gl_FragColor = vec4(col * vLit * uAlpha, 1.0);
+      }`,
+  });
+  const p = new THREE.Points(g, m);
+  p.frustumCulled = false; p.renderOrder = -4; p.visible = false;
+  scene.add(p);
+  return p;
+})();
+
+/* ---------- 五：我們的星系（氣體團 → 棒旋星系） ---------- */
+const galaxyGrp = new THREE.Group();
+galaxyGrp.position.copy(GAL_C);
+galaxyGrp.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(GAL_X, GAL_N, GAL_Z));
+scene.add(galaxyGrp);
+const HOLE_C = SUN_POS.clone().multiplyScalar(0.5);
+const galaxy = (() => {
+  const n = isMobile ? 45000 : 140000;
+  const start = new Float32Array(n * 3), target = new Float32Array(n * 3);
+  const seed = new Float32Array(n), size = new Float32Array(n), kind = new Float32Array(n);
+  const clumps = Array.from({ length: 9 }, () => {
+    const u = Math.random() * 2 - 1, th = Math.random() * PI * 2, r = RG * Math.sqrt(Math.random()) * 1.05, s = Math.sqrt(1 - u * u);
+    return [r * s * Math.cos(th), r * u * 0.6, r * s * Math.sin(th), RG * (0.2 + Math.random() * 0.26)];
+  });
+  for (let i = 0; i < n; i++) {
+    const c = clumps[i % clumps.length];
+    start.set([c[0] + gr() * c[3], c[1] + gr() * c[3] * 0.7, c[2] + gr() * c[3]], i * 3);
+    const k = Math.random(); let x, y, z, kd;
+    if (k < 0.17) { // 核球與棒
+      const bx = gr() * RG * 0.13, bz = gr() * RG * 0.045; y = gr() * RG * 0.034;
+      x = bx * Math.cos(GAL_PHI) - bz * Math.sin(GAL_PHI); z = bx * Math.sin(GAL_PHI) + bz * Math.cos(GAL_PHI); kd = 0;
+    } else if (k < 0.45) { // 盤面
+      const r = Math.min(-Math.log(1 - Math.random() * 0.985) * RG * 0.24, RG * 1.08), th = Math.random() * PI * 2;
+      x = r * Math.cos(th); z = r * Math.sin(th); y = gr() * RG * 0.012; kd = 1;
+    } else { // 旋臂：兩條主臂、兩條次臂
+      const arm = Math.random() < 0.7 ? (Math.random() < 0.5 ? 0 : 2) : (Math.random() < 0.5 ? 1 : 3);
+      const r = GAL_RB + (RG - GAL_RB) * Math.pow(Math.random(), 0.85);
+      const th = GAL_PHI + Math.log(r / GAL_RB) / GAL_KP + arm * PI / 2 + gr() * 0.13;
+      const rr = r + gr() * RG * 0.015;
+      x = rr * Math.cos(th); z = rr * Math.sin(th); y = gr() * RG * 0.009; kd = Math.random() < 0.07 ? 3 : 2;
+    }
+    target.set([x, y, z], i * 3);
+    seed[i] = Math.random(); kind[i] = kd;
+    size[i] = kd === 3 ? 2.2 + Math.random() * 1.6 : 0.6 + Math.pow(Math.random(), 3) * 2.2;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(target, 3));
+  g.setAttribute('aStart', new THREE.BufferAttribute(start, 3));
+  g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+  g.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
+  g.setAttribute('aKind', new THREE.BufferAttribute(kind, 1));
+  const m = new THREE.ShaderMaterial({
+    ...ADD,
+    uniforms: { uTime: { value: 0 }, uForm: { value: 0 }, uIgnite: { value: 0 }, uAlpha: { value: 0 }, uPx: { value: PX }, uHole: { value: HOLE_C.clone() }, uHoleR: { value: 45 } },
+    vertexShader: `
+      attribute vec3 aStart; attribute float aSeed, aSize, aKind;
+      uniform float uTime, uForm, uIgnite, uPx, uHoleR; uniform vec3 uHole;
+      varying float vSeed, vKind, vLit, vFade;
+      ${ROT2}
+      void main(){
+        float f = clamp(uForm * 1.5 - aSeed * 0.5, 0.0, 1.0);
+        f = f * f * (3.0 - 2.0 * f);
+        vec3 p = mix(aStart, position, f);
+        float r = length(position.xz);
+        p.xz = rot((1.0 - f) * (1.5 + aSeed * 2.2) * (1.0 - 0.45 * r / ${RG.toFixed(1)})) * p.xz;
+        p += (1.0 - f) * vec3(sin(uTime * 0.21 + aSeed * 40.0), cos(uTime * 0.17 + aSeed * 31.0), sin(uTime * 0.19 + aSeed * 53.0)) * 5.0;
+        vSeed = aSeed; vKind = aKind;
+        vLit = smoothstep(aSeed * 0.9, aSeed * 0.9 + 0.07, uIgnite);
+        vec4 wp = modelMatrix * vec4(p, 1.0);
+        vFade = smoothstep(uHoleR, uHoleR * 2.4, distance(wp.xyz, uHole));
+        vec4 mv = viewMatrix * wp;
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = clamp(aSize * uPx * (1500.0 / -mv.z), 1.0 * uPx, 5.0 * uPx) * mix(0.8, 1.0, vLit);
+      }`,
+    fragmentShader: `
+      uniform float uAlpha, uTime; varying float vSeed, vKind, vLit, vFade;
+      void main(){
+        float d = length(gl_PointCoord - 0.5);
+        float a = smoothstep(0.5, 0.0, d);
+        vec3 star = vKind < 0.5 ? vec3(1.0, 0.8, 0.52) : vKind < 1.5 ? vec3(1.0, 0.9, 0.78) : vKind < 2.5 ? vec3(0.6, 0.76, 1.0) : vec3(1.0, 0.42, 0.58);
+        vec3 col = mix(vec3(0.2, 0.24, 0.55), star, vLit);
+        float tw = 0.85 + 0.15 * sin(uTime * (0.8 + vSeed * 2.0) + vSeed * 90.0);
+        gl_FragColor = vec4(col, a * a * uAlpha * vFade * mix(0.22, 0.62, vLit) * tw);
+      }`,
+  });
+  const p = new THREE.Points(g, m);
+  p.frustumCulled = false; p.renderOrder = -2; p.visible = false;
+  galaxyGrp.add(p);
+  return p;
+})();
+// 星系整體的柔光（遠看時用）
+const galGlow = (() => {
+  const m = new THREE.ShaderMaterial({
+    ...ADD, side: THREE.DoubleSide, depthTest: false,
+    uniforms: { uAlpha: { value: 0 } },
+    vertexShader: `varying vec2 vQ; void main(){ vQ = vec2(position.x, -position.y); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `
+      uniform float uAlpha; varying vec2 vQ;
+      ${N4}
+      void main(){
+        const float RG = ${RG.toFixed(1)}, RB = ${GAL_RB.toFixed(2)}, KP = ${GAL_KP.toFixed(3)}, PHI = ${GAL_PHI.toFixed(5)};
+        float r = length(vQ), th = atan(vQ.y, vQ.x), rn = r / RG;
+        float arms = 0.0;
+        for (int i = 0; i < 4; i++){
+          float d = th - (PHI + log(max(r, 1.0) / RB) / KP + float(i) * 1.5707963);
+          d = atan(sin(d), cos(d));
+          arms += exp(-d * d / 0.05) * (mod(float(i), 2.0) < 0.5 ? 1.0 : 0.45);
+        }
+        arms *= smoothstep(RB * 0.75, RB * 1.3, r);
+        float blot = fbm(vec3(vQ * 0.022, 1.0)), lane = smoothstep(0.34, 0.6, fbm(vec3(vQ * 0.05, 4.0)));
+        float disk = exp(-rn * 3.4);
+        float bx = dot(vQ, vec2(cos(PHI), sin(PHI))), bz = dot(vQ, vec2(-sin(PHI), cos(PHI)));
+        float bar = exp(-bx * bx / (2.0 * pow(RG * 0.13, 2.0)) - bz * bz / (2.0 * pow(RG * 0.045, 2.0)));
+        float bulge = exp(-rn * rn * 80.0);
+        vec3 col = vec3(0.5, 0.68, 1.0) * arms * disk * 2.0 * (0.45 + blot) * mix(0.5, 1.0, lane)
+                 + vec3(1.0, 0.86, 0.68) * disk * 0.3 * mix(0.6, 1.0, lane)
+                 + vec3(1.0, 0.8, 0.5) * (bar * 0.8 + bulge * 1.3);
+        col *= smoothstep(1.15, 0.8, rn);
+        gl_FragColor = vec4(col * uAlpha, 1.0);
+      }`,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(RG * 2.4, RG * 2.4), m);
+  mesh.rotation.x = -PI / 2;
+  mesh.frustumCulled = false; mesh.renderOrder = -3; mesh.visible = false;
+  galaxyGrp.add(mesh);
+  return mesh;
+})();
+
+/* ---------- 六：旋臂裡的恆星與星雲 ---------- */
+const localStars = (() => {
+  const n = isMobile ? 3500 : 9000;
+  const pos = new Float32Array(n * 3), seed = new Float32Array(n), size = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const u = Math.random() * 2 - 1, th = Math.random() * PI * 2, r = 70 + Math.pow(Math.random(), 1.5) * 620, s = Math.sqrt(1 - u * u);
+    pos.set([HOLE_C.x + r * s * Math.cos(th), HOLE_C.y + r * u, HOLE_C.z + r * s * Math.sin(th)], i * 3);
+    seed[i] = Math.random(); size[i] = 0.7 + Math.pow(Math.random(), 4) * 3.2;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+  g.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
+  const m = new THREE.ShaderMaterial({
+    ...ADD,
+    uniforms: { uAlpha: { value: 0 }, uPx: { value: PX }, uTime: { value: 0 } },
+    vertexShader: `attribute float aSeed, aSize; uniform float uPx, uTime; varying float vS, vTw;
+      void main(){ vS = aSeed; vTw = 0.7 + 0.3 * sin(uTime * (0.6 + aSeed * 1.6) + aSeed * 70.0);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;
+        gl_PointSize = clamp(aSize * uPx * (240.0 / -mv.z), 1.0 * uPx, 6.5 * uPx); }`,
+    fragmentShader: `uniform float uAlpha; varying float vS, vTw;
+      void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d);
+        vec3 col = vS < 0.55 ? vec3(0.72, 0.84, 1.0) : vS < 0.85 ? vec3(1.0, 0.93, 0.8) : vec3(1.0, 0.66, 0.45);
+        gl_FragColor = vec4(col, a * a * vTw * uAlpha); }`,
+  });
+  const p = new THREE.Points(g, m);
+  p.frustumCulled = false; p.renderOrder = -2; p.visible = false;
+  scene.add(p);
+  return p;
+})();
+const nebulae = (() => {
+  const lat1 = new THREE.Vector3().crossVectors(DIR7, V3(0, 1, 0)).normalize(), lat2 = new THREE.Vector3().crossVectors(DIR7, lat1).normalize();
+  const pal = [[[1.0, 0.3, 0.5], [0.45, 0.2, 0.9]], [[0.2, 0.75, 0.85], [0.3, 0.35, 1.0]], [[1.0, 0.5, 0.25], [1.0, 0.25, 0.45]], [[0.5, 0.3, 1.0], [0.2, 0.6, 1.0]]];
+  // d：沿著鏡頭抵達的路線離太陽多遠（負的在太陽後面當背景），a、lr：往旁邊偏的方向與距離，s：大小
+  const defs = [
+    { d: 880, a: 0.4, lr: 330, s: 340 }, { d: 700, a: 3.3, lr: 260, s: 280 }, { d: 540, a: 1.7, lr: 210, s: 230 }, { d: 420, a: 4.6, lr: 170, s: 190 },
+    { d: 330, a: 0.2, lr: 150, s: 160 }, { d: 250, a: 2.6, lr: 135, s: 150 }, { d: 190, a: 5.4, lr: 120, s: 120 },
+    { d: -260, a: 1.0, lr: 190, s: 330 }, { d: -420, a: 3.9, lr: 260, s: 420 }, { d: -330, a: 5.6, lr: 60, s: 280 },
+  ];
+  return defs.map((df, i) => {
+    const c = pal[i % pal.length];
+    const m = new THREE.ShaderMaterial({
+      ...ADD, depthTest: false,
+      uniforms: { uAlpha: { value: 0 }, uSeed: { value: Math.random() * 40 }, uA: { value: new THREE.Color(...c[0]) }, uB: { value: new THREE.Color(...c[1]) } },
+      vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `uniform float uAlpha, uSeed; uniform vec3 uA, uB; varying vec2 vUv;
+        ${N4}
+        void main(){
+          vec2 q = (vUv - 0.5) * 2.0; float r = length(q);
+          float n = fbm(vec3(q * 1.7 + uSeed, uSeed * 3.0)), n2 = fbm(vec3(q * 4.2 + uSeed * 2.0, 1.0));
+          float a = smoothstep(0.25, 0.95, n + (1.0 - r) * 0.55 - 0.2) * smoothstep(1.0, 0.25, r) * (0.3 + n2 * 1.1);
+          gl_FragColor = vec4(mix(uA, uB, smoothstep(0.3, 0.65, n2)) * a * uAlpha, 1.0);
+        }`,
+    });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), m);
+    mesh.position.copy(SUN_POS).addScaledVector(DIR7, df.d).addScaledVector(lat1, Math.cos(df.a) * df.lr).addScaledVector(lat2, Math.sin(df.a) * df.lr);
+    mesh.scale.setScalar(df.s);
+    mesh.frustumCulled = false; mesh.renderOrder = -1; mesh.visible = false;
+    scene.add(mesh);
+    return mesh;
+  });
+})();
+
+/* ---------- 七：太陽星雲（暗雲 → 原行星盤）與太陽 ---------- */
+const cloudDark = (() => {
+  const m = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, depthTest: false,
+    uniforms: { uAlpha: { value: 0 }, uTime: { value: 0 } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform float uAlpha, uTime; varying vec2 vUv;
+      ${N4}
+      void main(){
+        vec2 q = (vUv - 0.5) * 2.0; float r = length(q);
+        float n = fbm(vec3(q * 2.1 + 5.0, uTime * 0.03)), n2 = fbm(vec3(q * 5.0, 2.0 + uTime * 0.02));
+        float a = smoothstep(0.22, 0.6, n + (1.0 - r) * 0.75 - 0.42) * smoothstep(1.0, 0.55, r);
+        vec3 col = mix(vec3(0.012, 0.008, 0.008), vec3(0.075, 0.04, 0.03), smoothstep(0.35, 0.7, n2) * (1.0 - a * 0.6));
+        gl_FragColor = vec4(col, a * uAlpha);
+      }`,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), m);
+  mesh.position.copy(SUN_POS);
+  mesh.frustumCulled = false; mesh.renderOrder = 1; mesh.visible = false;
+  scene.add(mesh);
+  return mesh;
+})();
+const solarGrp = new THREE.Group();
+solarGrp.position.copy(SUN_POS);
+solarGrp.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(DISK_E1, DISK_N, DISK_E2));
+scene.add(solarGrp);
+const solar = (() => {
+  const n = isMobile ? 22000 : 60000;
+  const start = new Float32Array(n * 3), target = new Float32Array(n * 3), seed = new Float32Array(n), size = new Float32Array(n);
+  const clumps = Array.from({ length: 7 }, () => [gr() * 14, gr() * 11, gr() * 14, 11 + Math.random() * 13]);
+  const gaps = [[22, 2.0], [40, 3.0], [57, 2.4], [71, 2.0]]; // 行星清出來的空隙，40 那一圈是地球
+  for (let i = 0; i < n; i++) {
+    const c = clumps[i % clumps.length];
+    start.set([c[0] + gr() * c[3], c[1] + gr() * c[3] * 0.85, c[2] + gr() * c[3]], i * 3);
+    let r = 0;
+    for (let tries = 0; tries < 6; tries++) { r = 4 + 82 * Math.pow(Math.random(), 0.8); if (!gaps.some(([gc, gw]) => Math.abs(r - gc) < gw) || Math.random() > 0.9) break; }
+    const th = Math.random() * PI * 2;
+    target.set([r * Math.cos(th), gr() * (0.18 + r * 0.028), r * Math.sin(th)], i * 3);
+    seed[i] = Math.random(); size[i] = 0.6 + Math.pow(Math.random(), 3) * 2.2;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(target, 3));
+  g.setAttribute('aStart', new THREE.BufferAttribute(start, 3));
+  g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+  g.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
+  const m = new THREE.ShaderMaterial({
+    ...ADD,
+    uniforms: { uTime: { value: 0 }, uForm: { value: 0 }, uAlpha: { value: 0 }, uSun: { value: 0 }, uPx: { value: PX }, uHole: { value: V3(0, 0, 0) }, uHoleR: { value: 0 } },
+    vertexShader: `
+      attribute vec3 aStart; attribute float aSeed, aSize;
+      uniform float uTime, uForm, uPx, uHoleR; uniform vec3 uHole;
+      varying float vR, vSeed, vFade, vF;
+      ${ROT2}
+      void main(){
+        float f = clamp(uForm * 1.5 - aSeed * 0.5, 0.0, 1.0);
+        f = f * f * (3.0 - 2.0 * f);
+        vec3 p = mix(aStart, position, f);
+        float r = length(position.xz);
+        p.xz = rot((1.0 - f) * (2.0 + aSeed * 3.0) + uTime * (0.02 + 0.5 * f * pow(6.0 / max(r, 4.0), 1.5))) * p.xz;
+        p += (1.0 - f) * vec3(sin(uTime * 0.3 + aSeed * 40.0), cos(uTime * 0.25 + aSeed * 30.0), sin(uTime * 0.2 + aSeed * 50.0)) * 0.9;
+        vR = r; vSeed = aSeed; vF = f;
+        vec4 wp = modelMatrix * vec4(p, 1.0);
+        vFade = uHoleR > 0.01 ? smoothstep(uHoleR * 0.6, uHoleR, distance(wp.xyz, uHole)) : 1.0;
+        vec4 mv = viewMatrix * wp;
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = clamp(aSize * uPx * (150.0 / -mv.z), 1.5 * uPx, 5.5 * uPx);
+      }`,
+    fragmentShader: `
+      uniform float uAlpha, uSun; varying float vR, vSeed, vFade, vF;
+      void main(){
+        float d = length(gl_PointCoord - 0.5);
+        float a = smoothstep(0.5, 0.0, d);
+        vec3 hot = mix(vec3(1.5, 1.2, 0.8), vec3(1.0, 0.46, 0.18), smoothstep(5.0, 30.0, vR));
+        hot = mix(hot, vec3(0.85, 0.36, 0.2), smoothstep(30.0, 85.0, vR));
+        vec3 dustC = mix(vec3(0.62, 0.4, 0.3), vec3(0.42, 0.34, 0.44), vSeed);
+        vec3 col = mix(dustC, hot * mix(0.55, 1.0, uSun), vF);
+        gl_FragColor = vec4(col, a * uAlpha * vFade * mix(0.5, 0.8, vF));
+      }`,
+  });
+  const p = new THREE.Points(g, m);
+  p.frustumCulled = false; p.renderOrder = 2; p.visible = false;
+  solarGrp.add(p);
+  return p;
+})();
+// 原行星盤的柔光：一圈一圈的塵埃環與行星清出來的空隙
+const diskGlow = (() => {
+  const m = new THREE.ShaderMaterial({
+    ...ADD, side: THREE.DoubleSide, depthWrite: false,
+    uniforms: { uAlpha: { value: 0 }, uTime: { value: 0 }, uSun: { value: 0 } },
+    vertexShader: `varying vec2 vQ; void main(){ vQ = vec2(position.x, -position.y); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `
+      uniform float uAlpha, uTime, uSun; varying vec2 vQ;
+      ${N4}
+      ${ROT2}
+      void main(){
+        float r = length(vQ);
+        vec2 q = rot(uTime * 0.04) * vQ;
+        float gap = 1.0 - 0.88 * (exp(-pow((r - 22.0) / 1.6, 2.0)) + exp(-pow((r - 40.0) / 2.4, 2.0)) + exp(-pow((r - 57.0) / 2.0, 2.0)) + exp(-pow((r - 71.0) / 1.7, 2.0)));
+        float n = fbm(vec3(q * 0.16, 2.0)), fine = 0.82 + 0.18 * sin(r * 2.1 + n * 2.5);
+        float body = (exp(-r / 30.0) * 0.8 + 0.06) * smoothstep(3.0, 7.0, r) * smoothstep(88.0, 66.0, r);
+        vec3 col = mix(vec3(1.5, 1.1, 0.7), vec3(1.0, 0.44, 0.17), smoothstep(5.0, 28.0, r));
+        col = mix(col, vec3(0.62, 0.22, 0.12), smoothstep(28.0, 80.0, r));
+        gl_FragColor = vec4(col * body * max(gap, 0.0) * fine * (0.6 + n) * mix(0.45, 1.0, uSun) * uAlpha * 0.42, 1.0);
+      }`,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(190, 190), m);
+  mesh.rotation.x = -PI / 2;
+  mesh.frustumCulled = false; mesh.renderOrder = 2; mesh.visible = false;
+  solarGrp.add(mesh);
+  return mesh;
+})();
+const sun = (() => {
+  const m = new THREE.ShaderMaterial({
+    ...ADD, depthTest: false,
+    uniforms: { uGlow: { value: 0 }, uLit: { value: 0 } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform float uGlow, uLit; varying vec2 vUv;
+      void main(){
+        vec2 q = (vUv - 0.5) * 2.0; float r = length(q);
+        float core = exp(-r * r * mix(1400.0, 700.0, uLit)), halo = exp(-r * mix(18.0, 11.0, uLit)) * 0.3;
+        float spike = (exp(-abs(q.y) * 240.0) * exp(-abs(q.x) * 5.0) + exp(-abs(q.x) * 240.0) * exp(-abs(q.y) * 5.0)) * 0.4 * uLit;
+        vec3 col = mix(vec3(1.0, 0.32, 0.1), vec3(1.0, 0.93, 0.78), uLit);
+        gl_FragColor = vec4(col * (core * 1.6 + halo + spike * 0.6) * uGlow * smoothstep(1.0, 0.7, r), 1.0);
+      }`,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), m);
+  mesh.position.copy(SUN_POS); mesh.scale.setScalar(120);
+  mesh.frustumCulled = false; mesh.renderOrder = 3; mesh.visible = false;
+  scene.add(mesh);
+  return mesh;
+})();
+
+/* ---------- 八：地球吸積、月球撞擊 ---------- */
+const accrete = (() => {
+  const n = isMobile ? 1200 : 2600;
+  const orb = new Float32Array(n * 3), misc = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    orb.set([3 + Math.pow(Math.random(), 0.7) * 17, Math.random() * PI * 2, gr() * 0.5], i * 3);
+    misc.set([Math.random() * 0.62, Math.random(), 0.8 + Math.pow(Math.random(), 3) * 2.6], i * 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(orb, 3));
+  g.setAttribute('aMisc', new THREE.BufferAttribute(misc, 3));
+  const m = new THREE.ShaderMaterial({
+    ...ADD,
+    uniforms: { uAcc: { value: 0 }, uTime: { value: 0 }, uPx: { value: PX }, uPR: { value: 0.1 }, uE1: { value: DISK_E1.clone() }, uE2: { value: DISK_E2.clone() }, uN: { value: DISK_N.clone() } },
+    vertexShader: `
+      attribute vec3 aMisc; uniform float uAcc, uTime, uPx, uPR; uniform vec3 uE1, uE2, uN; varying float vA, vG;
+      void main(){
+        float g = clamp((uAcc - aMisc.x) / 0.38, 0.0, 1.0);
+        float r = position.x * (1.0 - g * g);
+        float th = position.y + uTime * 0.9 / position.x + g * (3.0 + aMisc.y * 3.0);
+        vec3 p = (uE1 * cos(th) + uE2 * sin(th)) * r + uN * position.z * (1.0 - g);
+        vG = g;
+        vA = smoothstep(0.0, 0.04, uAcc) * smoothstep(uPR * 0.85, uPR * 1.25, r);
+        vec4 mv = viewMatrix * vec4(p, 1.0);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = clamp(aMisc.z * uPx * (30.0 / -mv.z), 1.2 * uPx, 8.0 * uPx);
+      }`,
+    fragmentShader: `varying float vA, vG;
+      void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d);
+        gl_FragColor = vec4(mix(vec3(0.75, 0.42, 0.24), vec3(1.6, 0.8, 0.3), vG), a * vA * 0.85); }`,
+  });
+  const p = new THREE.Points(g, m);
+  p.frustumCulled = false; p.renderOrder = 4; p.visible = false;
+  scene.add(p);
+  return p;
+})();
+const rockMat = (ca, cb) => new THREE.ShaderMaterial({
+  transparent: true,
+  uniforms: { uA: { value: new THREE.Color(...ca) }, uB: { value: new THREE.Color(...cb) }, uAlpha: { value: 1 }, uHot: { value: 1 }, uSeed: { value: Math.random() * 50 } },
+  vertexShader: `varying vec3 vN; varying vec3 vP; varying vec3 vV; void main(){ vP = position; vN = normalize(mat3(modelMatrix) * normal); vec4 w = modelMatrix * vec4(position, 1.0); vV = normalize(cameraPosition - w.xyz); gl_Position = projectionMatrix * viewMatrix * w; }`,
+  fragmentShader: `
+    uniform vec3 uA, uB; uniform float uAlpha, uHot, uSeed; varying vec3 vN; varying vec3 vP; varying vec3 vV;
+    ${N4}
+    void main(){
+      vec3 p = normalize(vP);
+      float n = fbm(p * 2.6 + uSeed), cr = fbm(p * 7.0 + uSeed * 1.7);
+      vec3 col = mix(uB, uA, smoothstep(0.35, 0.65, n)) * (0.75 + 0.5 * cr);
+      vec3 L = normalize(vec3(0.55, 0.75, 0.6));
+      float diff = max(dot(vN, L), 0.0);
+      vec3 lit = col * (0.03 + diff * 1.05);
+      float lava = fbm(p * 4.0 + uSeed * 2.0);
+      vec3 molten = mix(vec3(0.9, 0.25, 0.04), vec3(1.35, 0.85, 0.3), smoothstep(0.4, 0.7, lava));
+      gl_FragColor = vec4(mix(lit, molten, uHot), uAlpha);
+    }`,
+});
+const HIT_TH = -2.9; // 撞擊點在環面上的角度
+// 月球停下來的位置與碎片環的平面：[桌機, 直式手機]
+const RINGS = [V3(3.3, 1.5, -2.2), V3(1.5, 2.7, -2.2)].map((mp) => {
+  const m1 = mp.clone().normalize();
+  const n = V3(0, 1, 0).addScaledVector(m1, -m1.y).normalize();
+  const m2 = new THREE.Vector3().crossVectors(n, m1).normalize();
+  return { mp, m1, n, m2, rho: mp.length(), hit: m1.clone().multiplyScalar(Math.cos(HIT_TH)).addScaledVector(m2, Math.sin(HIT_TH)) };
+});
+const theia = (() => { const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.78, 48, 32), rockMat([0.6, 0.42, 0.3], [0.34, 0.2, 0.14])); mesh.visible = false; scene.add(mesh); return mesh; })();
+const moon = (() => { const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.44, 48, 32), rockMat([0.62, 0.61, 0.6], [0.3, 0.3, 0.31])); mesh.visible = false; scene.add(mesh); return mesh; })();
+const debris = (() => {
+  const n = isMobile ? 1600 : 3600;
+  const a1 = new Float32Array(n * 3), a2 = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    a1.set([(Math.random() * 2 - 1) * PI, 2.5 + Math.random() * 3.0, gr() * 0.22], i * 3);
+    a2.set([Math.random() * 0.55, Math.random(), 0.7 + Math.pow(Math.random(), 3) * 2.4], i * 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(a1, 3));
+  g.setAttribute('aMisc', new THREE.BufferAttribute(a2, 3));
+  const m = new THREE.ShaderMaterial({
+    ...ADD,
+    uniforms: { uEj: { value: 0 }, uCo: { value: 0 }, uTime: { value: 0 }, uPx: { value: PX }, uRhoM: { value: 1 }, uM1: { value: V3(1, 0, 0) }, uM2: { value: V3(0, 0, 1) }, uN: { value: V3(0, 1, 0) }, uAlpha: { value: 1 } },
+    vertexShader: `
+      attribute vec3 aMisc; uniform float uEj, uCo, uTime, uPx, uRhoM; uniform vec3 uM1, uM2, uN; varying float vA, vHot;
+      void main(){
+        float e = clamp((uEj - aMisc.x * 0.4) / 0.6, 0.0, 1.0); e = 1.0 - pow(1.0 - e, 3.0);
+        float c = smoothstep(aMisc.x, aMisc.x + 0.45, uCo);
+        float th = mix(mix(${HIT_TH.toFixed(2)}, position.x, e), 0.0, c) + uTime * 0.12 * (1.0 - c) * e;
+        float rho = mix(mix(${PLANET_R.toFixed(2)} + 0.05, position.y, e), uRhoM, c);
+        vec3 p = (uM1 * cos(th) + uM2 * sin(th)) * rho + uN * position.z * e * (1.0 - c);
+        vHot = 1.0 - e * 0.6;
+        vA = step(0.0005, uEj) * (1.0 - smoothstep(0.8, 1.0, c));
+        vec4 mv = viewMatrix * vec4(p, 1.0);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = clamp(aMisc.z * uPx * (22.0 / -mv.z), 1.2 * uPx, 7.0 * uPx);
+      }`,
+    fragmentShader: `uniform float uAlpha; varying float vA, vHot;
+      void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d);
+        gl_FragColor = vec4(mix(vec3(0.7, 0.45, 0.32), vec3(1.7, 0.9, 0.35), vHot), a * vA * uAlpha * 0.9); }`,
+  });
+  const p = new THREE.Points(g, m);
+  p.frustumCulled = false; p.renderOrder = 4; p.visible = false;
+  scene.add(p);
+  return p;
+})();
+
+/* ---------- 第一幕的數據：時間、溫度、物質、尺度 ---------- */
+const YR = 3.156e7, LY_AU = 63241, AU_KM = 1.496e8;
+const ly = (s) => Math.log10(s * YR);
+const keyed = (keys, x) => { // 分段線性內插
+  if (x <= keys[0][0]) return keys[0][1];
+  for (let i = 0; i < keys.length - 1; i++) if (x < keys[i + 1][0]) return lerp(keys[i][1], keys[i + 1][1], (x - keys[i][0]) / (keys[i + 1][0] - keys[i][0]));
+  return keys[keys.length - 1][1];
+};
+// 進度 → log10(大爆炸後幾秒)
+const TIME_K = [[BANG, -36], [0.05, -32], [0.06, -12], [0.10, -6], [0.115, 0], [0.125, Math.log10(180)], [0.135, Math.log10(1200)], [0.152, ly(3.8e5)], [0.20, ly(3.8e5)],
+  [0.245, ly(1e8)], [0.31, ly(2e8)], [0.445, ly(3e9)], [0.62, ly(9.23e9)], [0.765, ly(9.23e9)], [0.84, ly(9.26e9)], [0.90, ly(9.29e9)], [1.0, ly(9.4e9)]];
+// log10(秒) → log10(宇宙背景溫度 K)
+const TEMP_K = [[-12, 15], [-5, 12.3], [0, 10], [Math.log10(180), 9], [Math.log10(1200), 8.5], [ly(3.8e5), Math.log10(3000)], [ly(1e8), Math.log10(84)], [ly(2e8), Math.log10(55)],
+  [ly(3e9), Math.log10(8.5)], [ly(9.23e9), Math.log10(3.9)], [ly(9.4e9), Math.log10(3.8)]];
+// 進度 → log10(視野大約多少光年)
+const SCALE_K = [[0.21, 9], [0.31, 9], [0.445, 5.5], [0.62, 0.3], [0.70, -2.5], [0.745, -2.5], [0.83, -8.5], [1.0, -8.87]];
+const STAGES = [[0, '起點'], [BANG, '暴脹'], [0.05, '夸克—膠子電漿'], [0.10, '質子與中子形成'], [0.125, '原初核合成'], [0.135, '光子時期　宇宙仍不透明'], [0.152, '復合　宇宙變透明'], [0.20, '黑暗時期'], [0.25, '第一代恆星'],
+  [0.31, '星系形成'], [0.45, '銀河系　獵戶臂'], [0.62, '太陽星雲塌縮'], [0.70, '原行星盤'], [0.765, '地球吸積'], [0.84, '月球形成'], [0.915, '地殼凝固　海洋形成']];
+const MATTER = [[0, '—'], [BANG, '夸克　膠子'], [0.10, '質子　中子'], [0.125, '氫核 75%　氦核 25%'], [0.152, '氫 75%　氦 25%'], [0.62, '氫 71%　氦 27%　其他 2%'], [0.765, '鐵　氧　矽　鎂']];
+const stepped = (list, x) => { let v = list[0][1]; for (const [k, s] of list) if (x >= k) v = s; return v; };
+const num = (x) => Math.round(x).toLocaleString('en-US');
+const sig = (x) => Number(x.toPrecision(x < 20 ? 2 : 1));
+const fmtTime = (L) => {
+  if (L < -0.01) return `10<sup>${Math.round(L)}</sup> 秒`;
+  const s = Math.pow(10, L), y = s / YR;
+  if (s < 60) return `${Math.round(s)} 秒`;
+  if (s < 3600) return `${Math.round(s / 60)} 分鐘`;
+  if (s < 86400) return `${Math.round(s / 3600)} 小時`;
+  if (y < 1) return `${Math.round(s / 86400)} 日`;
+  if (y < 1e4) return `${num(sig(y))} 年`;
+  if (y < 1e8) return `${num(sig(y / 1e4))} 萬年`;
+  return `${(y / 1e8).toFixed(1)} 億年`;
+};
+const fmtTemp = (L) => {
+  if (L < -12) return '—';
+  const lt = keyed(TEMP_K, L), T = Math.pow(10, lt);
+  if (lt >= 4) return `約 10<sup>${Math.round(lt)}</sup> K`;
+  if (T >= 100) return `約 ${num(Number(T.toPrecision(2)))} K`;
+  return `${T.toFixed(T < 10 ? 1 : 0)} K`;
+};
+const fmtScale = (a) => {
+  if (a < 0.21) return '—';
+  const v = Math.pow(10, keyed(SCALE_K, a));
+  if (v >= 1e8) return `約 ${num(sig(v / 1e8))} 億光年`;
+  if (v >= 1e4) return `約 ${num(sig(v / 1e4))} 萬光年`;
+  if (v >= 1) return `約 ${num(sig(v))} 光年`;
+  const au = v * LY_AU;
+  if (au >= 1e4) return `約 ${num(sig(au / 1e4))} 萬天文單位`;
+  if (au >= 1) return `約 ${num(sig(au))} 天文單位`;
+  const km = au * AU_KM;
+  if (km >= 1e8) return `約 ${num(sig(km / 1e8))} 億公里`;
+  return `約 ${sig(km / 1e4)} 萬公里`;
+};
+
+/* ---------- 第一幕的鏡頭 ---------- */
+const HIT_A = 0.868; // 月球撞擊的那一刻
+const c1T = V3(0, 0, 0), c1D = V3(0, 0, 0), c1P = V3(0, 0, 0);
+function act1Cam(a, narrow) {
+  const D4 = narrow ? 4200 : 2600, D5 = narrow ? 1900 : 1050, D7 = narrow ? 300 : 175;
+  if (a < 0.45) { // 遠遠看著宇宙網，慢慢靠近正在成形的星系
+    c1D.copy(DIR5).applyAxisAngle(GAL_N, (a - 0.45) * 1.6);
+    camera.position.copy(GAL_C).addScaledVector(c1D, Math.exp(lerp(Math.log(D4), Math.log(D5), sstep(0.2, 0.45, a))));
+    lookAt.copy(GAL_C);
+  } else if (a < 0.62) { // 一路放大：整個盤面 → 旋臂 → 一團暗雲前
+    const u = (a - 0.45) / 0.17, ue = lerp(u, sstep(0, 1, u), 0.6);
+    c1T.copy(GAL_C).lerp(SUN_POS, sstep(0.0, 0.5, u));
+    c1D.copy(DIR5).lerp(DIR7, sstep(0.05, 0.95, u)).normalize();
+    camera.position.copy(c1T).addScaledVector(c1D, Math.exp(lerp(Math.log(D5), Math.log(D7), ue)));
+    lookAt.copy(c1T);
+  } else { // 看著暗雲塌縮成盤，然後飛進盤裡地球的位置
+    const v = clamp01((a - 0.62) / 0.125);
+    c1D.copy(DIR7).applyAxisAngle(DISK_N, 0.4 * v);
+    c1P.copy(SUN_POS).addScaledVector(c1D, D7 * lerp(1, 0.8, v));
+    if (a < 0.745) { camera.position.copy(c1P); lookAt.copy(SUN_POS); }
+    else {
+      camera.position.lerpVectors(c1P, camera.position, sstep(0.745, 0.83, a)); // camera.position 這時是關鍵格算出來的位置
+      lookAt.copy(SUN_POS).multiplyScalar(1 - sstep(0.1, 0.75, (a - 0.745) / 0.085));
+    }
+  }
+  camera.lookAt(lookAt);
+}
 
 /* ---------- 全息線條：用來畫化石、塔、樹、隔離罩 ---------- */
 // 每條線有出現順序 aT，uDraw 由 0 到 1 把線一條條畫出來；uBreak 讓整個東西碎開、變紅、往下掉
@@ -1028,6 +1541,7 @@ const flame = (() => {
 const q = (sel) => [...document.querySelectorAll(sel)];
 const el = {
   flash: $('flash'), dark: $('dark'), frame: $('frame'), watch: $('watch'), wTag: $('w-tag'), hint: $('hint'),
+  a1: $('a1'), cos: q('#cos li'), cStage: $('c-stage'), cTime: $('c-time'), cTemp: $('c-temp'), cMatter: $('c-matter'), cScale: $('c-scale'),
   line1: $('line1'), line2: $('line2'), hudLayer: $('hud'), hud: q('#hud li'), id: $('v-id'),
   vAu: $('v-au'), vYear: $('v-year'), vTilt: $('v-tilt'), vAir: $('v-air'), vWater: $('v-water'), vG: $('v-g'),
   a3: $('a3'), round: q('#round li'), a3end: $('a3end'), humanTag: $('humanTag'),
@@ -1166,7 +1680,8 @@ function frame() {
   const gone = sstep(0.25, 0.5, g);  // 實驗室的東西全部淡掉
 
   /* ---- 鏡頭 ---- */
-  sampleCam(p, narrow);
+  const in1 = p < B[1];
+  sampleCam(in1 ? B[1] * sstep(0.83, 1, a) : p, narrow); // 第一幕前段的鏡頭另外算，最後一段才接回關鍵格
   const orb = camState.orb + Math.sin(t * 0.07) * 0.05;
   camera.position.set(Math.sin(orb) * camState.z, camState.y, Math.cos(orb) * camState.z);
   right.set(Math.cos(orb), 0, -Math.sin(orb));
@@ -1177,50 +1692,108 @@ function frame() {
   cUp.setFromMatrixColumn(camera.matrixWorld, 1);
   cFwd.setFromMatrixColumn(camera.matrixWorld, 2).negate();
 
-  /* ---- 第一幕：一個小點 → 大爆炸 → 炸出許多星球 → 地球朝鏡頭飛來 ---- */
-  const BANG = 0.12, in1 = p < B[1];
-  const fly = clamp01((a - BANG) / 0.47), flyE = 1 - Math.pow(1 - fly, 3); // 地球從爆炸點飛到定位
+  /* ---- 第一幕：鏡頭 ---- */
   if (in1) {
-    // 一開始看著那個點，地球飛近之後視線跟到地球上
-    lookAt.copy(BANG_C).multiplyScalar(1 - sstep(0.3, 0.66, a));
-    camera.lookAt(lookAt);
-    const shake = gauss(a, BANG + 0.012, 0.018) * 0.3; // 爆開的瞬間鏡頭震一下
+    if (a < 0.83) act1Cam(a, narrow);
+    const shake = gauss(a, HIT_A + 0.002, 0.005) * 0.2; // 撞擊的瞬間鏡頭震一下
     if (shake > 0.001) { camera.position.x += Math.sin(t * 61) * shake; camera.position.y += Math.cos(t * 53) * shake; }
     camera.updateMatrixWorld();
     cRight.setFromMatrixColumn(camera.matrixWorld, 0); cUp.setFromMatrixColumn(camera.matrixWorld, 1); cFwd.setFromMatrixColumn(camera.matrixWorld, 2).negate();
   }
+
+  /* ---- 第一幕：暴脹 → 夸克湯 → 復合 ---- */
+  const skyOut = 1 - sstep(0.1, 0.55, b); // 第二幕發現是艙壁之後，天空整個淡掉
+  const camSun = camera.position.distanceTo(SUN_POS);
   {
-    const before = a < BANG, pre = sstep(0.015, BANG - 0.004, a), ringR = sstep(BANG, BANG + 0.3, a);
-    const bm = bang.material.uniforms;
-    bm.uGlow.value = in1 ? (before ? pre * (0.75 + 0.25 * Math.sin(t * 5.0)) : (1 - sstep(BANG, BANG + 0.16, a)) * 1.5) : 0;
-    bm.uTight.value = before ? lerp(140000, 26000, pre) : lerp(5000, 220, sstep(BANG, BANG + 0.05, a));
-    bm.uRing.value = ringR;
-    bm.uRingA.value = !before && in1 ? Math.pow(1 - ringR, 2) * 1.1 : 0;
-    bang.visible = bm.uGlow.value > 0.001 || bm.uRingA.value > 0.001;
-    bang.position.copy(BANG_C);
-    bang.quaternion.copy(camera.quaternion);
+    const cu = cosmos.material.uniforms, on = in1 && a < 0.215;
+    cosmos.visible = on;
+    if (on) {
+      cu.uTime.value = t; cu.uAspect.value = camera.aspect;
+      cu.uHeat.value = sstep(BANG, BANG + 0.004, a) * (1 - sstep(0.165, 0.213, a));
+      cu.uTemp.value = a < 0.06 ? lerp(1.0, 0.7, sstep(0.03, 0.06, a)) : a < 0.135 ? lerp(0.7, 0.42, sstep(0.06, 0.135, a)) : lerp(0.42, 0.1, sstep(0.135, 0.2, a));
+      cu.uZoom.value = lerp(70, 2.4, 1 - Math.pow(1 - clamp01((a - BANG) / 0.03), 5)) * lerp(1, 0.6, sstep(0.05, 0.2, a)); // 空間本身被拉開
+      cu.uFog.value = 1 - sstep(0.152, 0.185, a);
+      cu.uRays.value = gauss(a, 0.172, 0.014);
+      cu.uSparks.value = pulse(a, 0.05, 0.135, 0.015);
+    }
   }
-  // 其他星球：從同一點飛出去，各自減速停在遠處；第二幕發現是艙壁之後淡掉
-  const worldsA = sstep(BANG + 0.004, BANG + 0.03, a) * (1 - sstep(0.1, 0.55, b));
-  for (const w of worlds) {
-    w.mesh.visible = worldsA > 0.002;
-    if (!w.mesh.visible) continue;
-    const u = clamp01((a - BANG) / 0.5 * w.speed), e2 = 1 - Math.pow(1 - u, 3);
-    w.mesh.position.copy(BANG_C).lerp(w.rest, e2);
-    w.mesh.rotation.y = t * 0.03;
-    w.m.uniforms.uAlpha.value = worldsA;
-    w.m.transparent = worldsA < 0.999;
-    w.m.uniforms.uHot.value = 1 - sstep(0.15, 0.7, u);
-    if (w.ringMat) w.ringMat.uniforms.uAlpha.value = worldsA * sstep(0.4, 0.9, u);
+
+  /* ---- 第一幕：黑暗時期 → 第一代恆星 → 星系 → 放大進銀河系 ---- */
+  {
+    const gA = sstep(0.215, 0.26, a) * skyOut;
+    const ignite = sstep(0.245, 0.335, a), gform = sstep(0.31, 0.445, a);
+    web.material.uniforms.uAlpha.value = gA * lerp(1, 0.35, sstep(0.31, 0.45, a)) * (1 - sstep(0.47, 0.56, a));
+    web.visible = web.material.uniforms.uAlpha.value > 0.002;
+    const bgu = bgGal.material.uniforms;
+    bgu.uAlpha.value = gA * lerp(1, 0.45, sstep(0.47, 0.6, a)); bgu.uIgnite.value = ignite; bgu.uGrow.value = sstep(0.3, 0.47, a); bgu.uTime.value = t;
+    bgu.uH.value = renderer.domElement.height / (2 * TAN);
+    bgGal.visible = gA > 0.002;
+    const gu = galaxy.material.uniforms;
+    gu.uTime.value = t; gu.uForm.value = gform; gu.uIgnite.value = ignite; gu.uAlpha.value = gA;
+    galaxy.visible = gA > 0.002;
+    galGlow.material.uniforms.uAlpha.value = gform * gform * sstep(150, 560, camSun) * skyOut * 0.85;
+    galGlow.visible = galGlow.material.uniforms.uAlpha.value > 0.002;
+    const nearA = sstep(0.45, 0.5, a) * sstep(1000, 430, camSun) * skyOut;
+    localStars.material.uniforms.uAlpha.value = nearA; localStars.material.uniforms.uTime.value = t;
+    localStars.visible = nearA > 0.002;
+    for (const nb of nebulae) {
+      const nu = nb.material.uniforms;
+      nu.uAlpha.value = nearA * 0.26 * sstep(nb.scale.x * 0.25, nb.scale.x * 0.8, camera.position.distanceTo(nb.position));
+      nb.visible = nu.uAlpha.value > 0.002;
+      if (nb.visible) nb.quaternion.copy(camera.quaternion);
+    }
+  }
+
+  /* ---- 第一幕：太陽星雲 → 原行星盤 → 地球、月球 ---- */
+  const pScale = lerp(0.08, 1, sstep(0.772, 0.85, a));
+  {
+    const su = solar.material.uniforms;
+    const lit = sstep(0.703, 0.712, a); // 核融合點燃
+    su.uTime.value = t; su.uForm.value = sstep(0.635, 0.725, a);
+    su.uAlpha.value = sstep(0.54, 0.62, a) * (1 - sstep(0.88, 0.95, a)) * skyOut;
+    su.uSun.value = sstep(0.645, 0.7, a) * 0.4 + lit * 0.6;
+    su.uHoleR.value = 15 * sstep(0.762, 0.84, a);
+    solar.visible = su.uAlpha.value > 0.002;
+    const dg = diskGlow.material.uniforms;
+    dg.uAlpha.value = sstep(0.68, 0.735, a) * (1 - sstep(0.79, 0.87, a)) * skyOut; dg.uTime.value = t; dg.uSun.value = su.uSun.value;
+    diskGlow.visible = dg.uAlpha.value > 0.002;
+    const dk = sstep(0.53, 0.61, a) * (1 - sstep(0.635, 0.7, a));
+    cloudDark.material.uniforms.uAlpha.value = dk * 0.94; cloudDark.material.uniforms.uTime.value = t;
+    cloudDark.visible = dk > 0.002;
+    if (cloudDark.visible) { cloudDark.quaternion.copy(camera.quaternion); cloudDark.scale.setScalar(150 * lerp(1, 0.4, sstep(0.635, 0.7, a))); }
+    sun.material.uniforms.uGlow.value = (sstep(0.645, 0.7, a) * 0.3 + lit * 0.9) * skyOut;
+    sun.material.uniforms.uLit.value = lit;
+    sun.visible = sun.material.uniforms.uGlow.value > 0.002;
+    if (sun.visible) sun.quaternion.copy(camera.quaternion);
+
+    const accU = clamp01((a - 0.765) / 0.085);
+    accrete.visible = in1 && accU > 0 && accU < 1;
+    if (accrete.visible) { const au = accrete.material.uniforms; au.uAcc.value = accU; au.uTime.value = t; au.uPR.value = PLANET_R * pScale; }
+
+    const ring = RINGS[narrow ? 1 : 0];
+    const thU = clamp01((a - (HIT_A - 0.033)) / 0.033);
+    theia.visible = in1 && thU > 0 && thU < 1;
+    if (theia.visible) { theia.position.copy(ring.hit).multiplyScalar(lerp(34, PLANET_R + 0.45, thU * thU)); theia.rotation.y = t * 0.2; }
+    const du = debris.material.uniforms;
+    du.uEj.value = clamp01((a - HIT_A) / 0.04); du.uCo.value = clamp01((a - 0.9) / 0.062); du.uTime.value = t; du.uAlpha.value = skyOut;
+    du.uM1.value.copy(ring.m1); du.uM2.value.copy(ring.m2); du.uN.value.copy(ring.n); du.uRhoM.value = ring.rho;
+    debris.visible = du.uEj.value > 0 && du.uCo.value < 1 && skyOut > 0.002;
+    const mS = sstep(0.915, 0.96, a);
+    moon.visible = mS > 0.001 && skyOut > 0.002;
+    if (moon.visible) {
+      moon.position.copy(ring.mp); moon.scale.setScalar(mS); moon.rotation.y = t * 0.05;
+      moon.material.uniforms.uHot.value = 1 - sstep(0.935, 0.995, a);
+      moon.material.uniforms.uAlpha.value = skyOut; moon.material.transparent = skyOut < 0.999;
+    }
   }
 
   /* ---- 那道光 ---- */
-  const crack = sstep(0.62, 0.86, a);
+  const crack = sstep(0.925, 0.965, a);
   const open = 1;
   const bu = beam.material.uniforms;
   bu.uTime.value = t;
-  bu.uWidth.value = lerp(lerp(0.02, 1.0, open) * lerp(1.0, 0.5, sstep(0.5, 0.95, a)) * lerp(1.0, 0.8, cold), 1.0, back);
-  bu.uI.value = lerp(crack * lerp(1.0, 1.15, open) * lerp(1.0, 0.5, sstep(0.5, 0.95, a)) * lerp(1.0, 1.3, cold) * (1 + killing * 0.35), 1.15, back);
+  bu.uWidth.value = lerp(lerp(0.02, 1.0, open) * 0.5 * lerp(1.0, 0.8, cold), 1.0, back);
+  bu.uI.value = lerp(crack * lerp(1.0, 1.15, open) * 0.5 * lerp(1.0, 1.3, cold) * (1 + killing * 0.35), 1.15, back);
   bu.uBottom.value = lerp(PLANET_R * 0.98, -60, back);
   bu.uTop.value = lerp(BEAM_TOP, 80, back);
   tmpColor.copy(WARM).lerp(COLD, cold).lerp(KILL, killing * 0.85).lerp(WARM, back);
@@ -1229,16 +1802,8 @@ function frame() {
 
   /* ---- 星空、塵埃 ---- */
   stars.material.uniforms.uTime.value = t;
-  stars.material.uniforms.uAlpha.value = sstep(BANG + 0.01, BANG + 0.2, a) * lerp(lerp(1, 0.08, sstep(0.1, 0.6, b)), 1, back);
+  stars.material.uniforms.uAlpha.value = sstep(0.54, 0.62, a) * lerp(lerp(1, 0.08, sstep(0.1, 0.6, b)), 1, back);
   stars.rotation.y = t * 0.004;
-  const du = dust.material.uniforms;
-  du.uTime.value = t;
-  du.uForm.value = 0;
-  du.uBang.value = sstep(BANG, BANG + 0.42, a);
-  du.uHot.value = 1 - sstep(BANG + 0.01, BANG + 0.2, a);
-  du.uAlpha.value = sstep(BANG - 0.001, BANG + 0.006, a) * lerp(1, 0.55, sstep(0.5, 0.9, a)) * (1 - sstep(0.1, 0.55, b));
-  du.uCold.value = cold;
-  dust.visible = du.uAlpha.value > 0.002;
 
   /* ---- 壓制三段的進度 ---- */
   const v1 = clamp01((e - 0.04) / 0.32), v2 = clamp01((e - 0.36) / 0.30), v3 = clamp01((e - 0.66) / 0.27);
@@ -1246,10 +1811,10 @@ function frame() {
   const lock = sstep(0.68, 0.95, v3) * (1 - sstep(0.1, 0.3, f)); // 最後把環收緊、變紅
 
   /* ---- 星球 ---- */
-  const reveal = sstep(BANG, 0.8, a);
+  const reveal = a < 0.885 ? 0.25 * sstep(0.762, 0.776, a) : lerp(0.25, 1, sstep(0.885, 0.965, a)); // 先是熔融的球，月球撞擊之後才冷卻
   const pu = planet.material.uniforms;
   pu.uTime.value = t; pu.uReveal.value = reveal; pu.uCold.value = cold; pu.uFade.value = 1 - gone;
-  planet.visible = gone < 0.999;
+  planet.visible = gone < 0.999 && reveal > 0.001;
   pu.uSeed.value = rs.seed; pu.uLife.value = rs.life; pu.uWipe.value = rs.wipe; pu.uType.value = rs.type;
   pu.uEra.value = Math.min(rs.seed, 4); pu.uReal.value = rs.seed >= 5 ? 1 : 0;
   pu.uFlood.value = pulse(d, 0.30, 0.50, 0.06);
@@ -1257,8 +1822,7 @@ function frame() {
   pu.uWar.value = pulse(d, 0.68, 0.92, 0.05);
   pu.uSpark.value = sstep(0.42, 0.8, v3);
   planet.rotation.y = t * 0.035;
-  planet.position.copy(BANG_C).multiplyScalar(1 - flyE);
-  atmo.position.copy(planet.position);
+  planet.scale.setScalar(pScale); atmo.scale.setScalar(pScale);
   atmo.material.uniforms.uReveal.value = reveal * (1 - gone);
   atmo.material.uniforms.uHot.value = 1 - sstep(0.3, 0.9, reveal);
   atmo.material.uniforms.uKill.value = killing * (rs.type >= 2 ? 0.6 : 0.15);
@@ -1277,7 +1841,7 @@ function frame() {
     meteor.material.opacity = sstep(0, 0.15, k);
   } else meteor.material.opacity = 0;
   const impactFlash = (inAct3 && rs.r === 4) ? gauss(rs.u, 0.575, 0.012) * 0.75 : 0;
-  const flashV = gauss(a, BANG + 0.003, 0.007) * 0.9 * (in1 ? 1 : 0) + impactFlash + gauss(v1, 0.9, 0.03) * 0.3 * (stage === 0 ? 1 : 0);
+  const flashV = (in1 ? gauss(a, BANG + 0.002, 0.004) * 0.9 + gauss(a, 0.7065, 0.004) * 0.35 + gauss(a, HIT_A + 0.0015, 0.004) * 0.8 : 0) + impactFlash + gauss(v1, 0.9, 0.03) * 0.3 * (stage === 0 ? 1 : 0);
   setO(el.flash, flashV);
 
   /* ---- 第三幕：演化樹、化石、DNA ---- */
@@ -1309,6 +1873,7 @@ function frame() {
   chamberMat.opacity = sstep(0.28, 0.85, b) * 0.5 * lerp(1, 0.55, sstep(0.3, 0.9, f)) * (1 - gone);
   const em = sstep(0.22, 0.7, b) * (1 - gone);
   emitterMat.opacity = em; emitterBody.opacity = em; emitterEdge.opacity = em * 0.8;
+  emitter.grp.visible = em > 0.002; // 看不見的時候也不要擋住後面的東西
   emitter.rings.forEach((r, i) => { r.rotation.z = t * (0.4 - i * 0.25); });
 
   /* ---- 第四幕：祈禱 ---- */
@@ -1346,12 +1911,19 @@ function frame() {
   others.liveMat.opacity = oth * 0.34; others.deadMat.opacity = oth * 0.2; others.beamMat.opacity = oth * 0.8;
   others.dotMat.uniforms.uAlpha.value = oth;
 
-  bloom.strength = lerp(lerp(0.75, 0.6, cold) * lerp(1, 0.55, sstep(0.0, 0.15, c)), 0.75, back) + flashV * 1.0 + killing * 0.08;
+  bloom.strength = (lerp(lerp(0.75, 0.6, cold) * lerp(1, 0.55, sstep(0.0, 0.15, c)), 0.75, back) + flashV * 1.0 + killing * 0.08) * (cosmos.visible ? 0.3 : 1);
   bloom.threshold = lerp(lerp(0.32, 0.5, sstep(0.0, 0.15, c)), 0.32, back);
 
   /* ================= 文字 ================= */
   setO(el.hint, 1 - sstep(0.0, 0.004, p));
-  setO(el.line1, sstep(0.72, 0.88, a) * (1 - sstep(0.02, 0.16, b)));
+  setO(el.line1, sstep(0.955, 0.985, a) * (1 - sstep(0.02, 0.16, b)));
+  const a1on = in1 ? sstep(BANG + 0.004, BANG + 0.02, a) * (1 - sstep(0.925, 0.95, a)) : 0;
+  setO(el.a1, a1on);
+  el.cos.forEach((li) => row(li, a1on));
+  if (a1on > 0) {
+    const L = keyed(TIME_K, a);
+    setT(el.cStage, stepped(STAGES, a)); setH(el.cTime, fmtTime(L)); setH(el.cTemp, fmtTemp(L)); setT(el.cMatter, stepped(MATTER, a)); setT(el.cScale, fmtScale(a));
+  }
   const act2Out = 1 - sstep(0.0, 0.07, c);
   setO(el.line2, sstep(0.56, 0.74, b) * act2Out);
   setO(el.hudLayer, act2Out);
