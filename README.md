@@ -8,5 +8,6 @@
 
 - `public/`：要發布的靜態檔（`index.html`、打包後的 `app.js`）
 - `src/main.js`：場景原始碼（Three.js）
+- `src/sea.js`：第三幕第一輪的海底場景（奧陶紀：直角石、三葉蟲、海百合、無頜魚，程式拼的模型，比例不是真實的）
 - 重新打包：`npx esbuild src/main.js --bundle --minify --format=esm --outfile=public/app.js`
 - 除錯：網址加 `?p=0.4` 可直接看某個捲動進度（0～1）

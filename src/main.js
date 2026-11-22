@@ -5,6 +5,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { feature } from 'topojson-client';
 import landTopo from 'world-atlas/land-110m.json';
+import { createSea, SEA_IN, SEA_OUT } from './sea.js';
 
 /* ---------- 工具 ---------- */
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
@@ -25,7 +26,7 @@ const isMobile = Math.min(innerWidth, innerHeight) < 768;
 
 /* ---------- 八幕時間軸 ---------- */
 // 0 創世（大爆炸到地球）、1 拉遠、2 五次銷毀、3 祈禱、4 壓制、5 其他實驗場、6 回到那道光、7 你
-const WEIGHTS = [1.5, 0.9, 2.8, 1.2, 1.9, 0.9, 0.9, 1.0];
+const WEIGHTS = [1.5, 0.9, 3.54, 1.2, 1.9, 0.9, 0.9, 1.0];
 const NA = WEIGHTS.length;
 const B = [0];
 { const sum = WEIGHTS.reduce((s, w) => s + w, 0); let acc = 0; for (const w of WEIGHTS) { acc += w / sum; B.push(acc); } B[NA] = 1; }
@@ -1273,6 +1274,9 @@ const flame = (() => {
   return p;
 })();
 
+/* ---------- 第三幕第一輪的海底場景 ---------- */
+const sea = createSea(scene, isMobile, PX);
+
 /* ---------- DOM ---------- */
 const q = (sel) => [...document.querySelectorAll(sel)];
 const el = {
@@ -1324,20 +1328,24 @@ const updateWatch = () => {
 };
 
 /* ---------- 第三幕：六輪的狀態 ---------- */
-const ROUND_W = [0.165, 0.165, 0.18, 0.14, 0.18, 0.17];
-const ROUND_B = [0]; { let acc = 0; for (const w of ROUND_W) { acc += w; ROUND_B.push(acc); } ROUND_B[6] = 1; }
+const ROUND_W = [0.43, 0.165, 0.18, 0.14, 0.18, 0.17]; // 第一輪比較長：多了潛進海裡那一段
+const ROUND_B = [0]; { const sum = ROUND_W.reduce((x, w) => x + w, 0); let acc = 0; for (const w of ROUND_W) { acc += w / sum; ROUND_B.push(acc); } ROUND_B[6] = 1; }
+// 第一輪：把拉長後的進度 v 對回原本的節奏（投放 → 培養 → 銷毀 → 換下一輪），中間那一大段在海裡
+const R0_MAP = [[0, 0], [0.12, 0.2], [0.6, 0.5], [0.78, 0.56], [0.9, 0.8], [0.94, 0.86], [1, 1]];
+const r0u = (v) => { for (let i = 0; i < R0_MAP.length - 1; i++) if (v < R0_MAP[i + 1][0]) return lerp(R0_MAP[i][1], R0_MAP[i + 1][1], (v - R0_MAP[i][0]) / (R0_MAP[i + 1][0] - R0_MAP[i][0])); return 1; };
 const roundState = (p) => {
   if (p <= B[2]) return { r: 0, u: 0, life: 1, wipe: 0, type: 0, seed: 0, grow: 0, killT: 0, on: false };
   if (p >= B[3]) return { r: 5, u: 1, life: 1, wipe: 0, type: 0, seed: 5, grow: 6, killT: 5, on: false };
   const c = local(2, p);
   let r = 0; while (r < 5 && c >= ROUND_B[r + 1]) r++;
-  const u = clamp01((c - ROUND_B[r]) / (ROUND_B[r + 1] - ROUND_B[r]));
+  const v = clamp01((c - ROUND_B[r]) / (ROUND_B[r + 1] - ROUND_B[r]));
+  const u = r === 0 ? r0u(v) : v;
   if (r === 5) return { r, u, life: sstep(0.0, 0.5, u), wipe: 0, type: 0, seed: 5, grow: 5 + sstep(0.05, 0.6, u), killT: 5, on: true };
   const swapped = u >= 0.86;
   const kill = sstep(0.56, 0.8, u);
   return {
-    r, u, on: true,
-    life: swapped ? 0 : (r === 0 ? 1 : sstep(0.05, 0.42, u)),
+    r, u, v, on: true,
+    life: swapped ? 0 : (r === 0 ? sstep(0.09, 0.2, v) : sstep(0.05, 0.42, u)), // 第一輪：光打下來之後生命才出現
     wipe: u < 0.8 ? kill : 1 - sstep(0.9, 1.0, u),
     type: r, seed: swapped ? r + 1 : r,
     grow: r + sstep(0.08, 0.5, u), killT: r + kill,
@@ -1436,6 +1444,21 @@ function frame() {
     cRight.setFromMatrixColumn(camera.matrixWorld, 0); cUp.setFromMatrixColumn(camera.matrixWorld, 1); cFwd.setFromMatrixColumn(camera.matrixWorld, 2).negate();
   }
 
+  /* ---- 第三幕第一輪：光打下來投放 → 俯衝入海 → 海裡的生態 → 結冰 → 回到軌道 ---- */
+  const seaV = p > B[2] && p < B[3] && rs.r === 0 ? rs.v : -1;
+  const seaOn = seaV > SEA_IN && seaV < SEA_OUT;
+  const seedPulse = seaV >= 0 ? gauss(seaV, 0.07, 0.03) : 0;
+  const seaFlash = seaV >= 0 ? (gauss(seaV, SEA_IN, 0.014) + gauss(seaV, SEA_OUT, 0.014)) * 0.95 : 0;
+  if (seaV >= 0 && !seaOn) {
+    const dive = sstep(0.13, SEA_IN, seaV) * (1 - sstep(SEA_OUT, SEA_OUT + 0.08, seaV));
+    if (dive > 0.001) { camera.position.multiplyScalar(lerp(1, (PLANET_R + 0.45) / camera.position.length(), dive * dive)); lookAt.multiplyScalar(1 - dive); camera.lookAt(lookAt); }
+  }
+  sea.update(seaOn, camera, lookAt, seaV, t);
+  if (seaV >= 0) {
+    camera.updateMatrixWorld();
+    cRight.setFromMatrixColumn(camera.matrixWorld, 0); cUp.setFromMatrixColumn(camera.matrixWorld, 1); cFwd.setFromMatrixColumn(camera.matrixWorld, 2).negate();
+  }
+
   /* ---- 第一幕：一個點 → 炸出許多星系 → 放大進銀河系 ---- */
   const skyOut = 1 - sstep(0.1, 0.55, b); // 第二幕發現是艙壁之後，天空整個淡掉
   const camSun = camera.position.distanceTo(SUN_POS);
@@ -1503,6 +1526,7 @@ function frame() {
   bu.uTop.value = lerp(BEAM_TOP, 80, back);
   tmpColor.copy(WARM).lerp(COLD, cold).lerp(KILL, killing * 0.85).lerp(WARM, back);
   bu.uColor.value.copy(tmpColor);
+  if (seaOn) bu.uI.value = 0; else if (seedPulse > 0.001) { bu.uI.value *= 1 + seedPulse * 2.5; bu.uWidth.value *= 1 + seedPulse * 1.5; } // 投放：一道特別亮的光打下來
   beam.rotation.y = Math.atan2(camera.position.x, camera.position.z);
 
   /* ---- 星空、塵埃 ---- */
@@ -1546,17 +1570,17 @@ function frame() {
     meteor.material.opacity = sstep(0, 0.15, k);
   } else meteor.material.opacity = 0;
   const impactFlash = (inAct3 && rs.r === 4) ? gauss(rs.u, 0.575, 0.012) * 0.75 : 0;
-  const flashV = (in1 ? gauss(a, BANG + 0.004, 0.008) * 0.9 : 0) + impactFlash + gauss(v1, 0.9, 0.03) * 0.3 * (stage === 0 ? 1 : 0);
+  const flashV = (in1 ? gauss(a, BANG + 0.004, 0.008) * 0.9 : 0) + seaFlash + impactFlash + gauss(v1, 0.9, 0.03) * 0.3 * (stage === 0 ? 1 : 0);
   setO(el.flash, flashV);
 
   /* ---- 第三幕：演化樹、化石、DNA ---- */
   const a3on = sstep(0.04, 0.1, c) * (1 - sstep(0.0, 0.08, d));
   evo.mat.uniforms.uGrow.value = rs.grow;
   evo.mat.uniforms.uKillT.value = rs.killT;
-  evo.mat.uniforms.uAlpha.value = narrow ? 0 : a3on;
+  evo.mat.uniforms.uAlpha.value = narrow || seaOn ? 0 : a3on;
   evo.grp.visible = evo.mat.uniforms.uAlpha.value > 0.002;
   if (evo.grp.visible) anchor(evo.grp, -0.62, 0.1, 0.25);
-  evo.cuts.forEach((m, r) => { m.opacity = (rs.killT > r ? sstep(r, r + 0.3, rs.killT) : 0) * 0.7 * a3on * (narrow ? 0 : 1); });
+  evo.cuts.forEach((m, r) => { m.opacity = (rs.killT > r ? sstep(r, r + 0.3, rs.killT) : 0) * 0.7 * a3on * (narrow || seaOn ? 0 : 1); });
   if (narrow) anchor(fossils.grp, 0, 0.56, 0.085); else anchor(fossils.grp, 0.6, 0.42, 0.15);
   fossils.list.forEach((fo, i) => {
     const on = SHOW_FOSSILS && inAct3 && rs.r === i && rs.u > 0.1 && rs.u < 0.88;
@@ -1618,6 +1642,7 @@ function frame() {
 
   bloom.strength = lerp(lerp(0.75, 0.6, cold) * lerp(1, 0.55, sstep(0.0, 0.15, c)), 0.75, back) + flashV * 1.0 + killing * 0.08;
   bloom.threshold = lerp(lerp(0.32, 0.5, sstep(0.0, 0.15, c)), 0.32, back);
+  if (seaOn) { bloom.strength = 0.3; bloom.threshold = 0.7; }
 
   /* ================= 文字 ================= */
   setO(el.hint, 1 - sstep(0.0, 0.004, p));
